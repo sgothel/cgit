@@ -79,6 +79,32 @@ static char *xstrrchr(char *s, char *from, int c)
 	return from < s ? NULL : from;
 }
 
+static char *read_git_head_branch(const char *repo_path) {
+	struct strbuf path = STRBUF_INIT;
+	size_t size;
+	char *line = NULL;
+
+	strbuf_addf(&path, "%s/HEAD", repo_path);
+
+	if (read_first_line(path.buf, &line, &size)) {
+		strbuf_release(&path);
+		free(line);
+		return NULL;
+	}
+	strbuf_release(&path);
+
+	const char *refname;
+	char *result = NULL;
+
+	if (!line || !skip_prefix(line, "ref: refs/heads/", &refname)) {
+		free(line);
+		return NULL;
+	}
+	result = xstrdup(refname);
+	free(line);
+	return result;
+}
+
 static void add_repo(const char *base, struct strbuf *path)
 {
 	struct stat st;
@@ -179,6 +205,9 @@ static void add_repo(const char *base, struct strbuf *path)
 	strbuf_addstr(path, "cgitrc");
 	if (!stat(path->buf, &st))
 		parse_configfile(path->buf, &scan_tree_repo_config);
+
+	if (!repo->defbranch)
+		repo->defbranch = read_git_head_branch(repo->path);
 
 	strbuf_release(&rel);
 }
