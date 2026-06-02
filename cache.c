@@ -82,32 +82,151 @@ static int close_slot(struct cache_slot *slot)
 	return err;
 }
 
+#define MY_MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
+#define MY_MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
+
+static int sendslot_to_idle(const struct timespec *tStart,
+			    const struct timespec *tLastSend,
+			    const struct timespec *tNow,
+			    size_t off, size_t size, struct cache_slot *slot)
+{
+	const long td_total = cgit_ts_ms_sub(tNow, tStart);
+	const long td_idle = cgit_ts_ms_sub(tNow, tLastSend);
+	const long rate = off / MY_MAX(1, td_total/1000);
+	cache_log("[cgit] send_slot timeout idle %ldms: sending cache "
+			  "%s (%s) (%ld/%ld bytes) to client `%s` "
+			  "within [total %ldms, idle %ldms, rate %ld Bps]\n",
+			  td_idle, slot->cache_name, slot->key, off, size, ctx.env.remote_addr,
+			  td_total, td_idle, rate);
+	return ETIMEDOUT;
+}
+
+static int sendslot_to_minrate(const struct timespec *tStart,
+			       const struct timespec *tNow,
+			       size_t off, size_t size, struct cache_slot *slot)
+{
+	const long td_total = cgit_ts_ms_sub(tNow, tStart);
+	const long rate = off / MY_MAX(1, td_total/1000);
+	cache_log("[cgit] send_slot timeout rate-limit %d Bps: sending "
+			  "cache %s (%s) (%ld/%ld bytes) to client `%s` "
+			  "within [total %ldms, rate %ld Bps]\n",
+			  ctx.cfg.client_io_min_rate, slot->cache_name, slot->key,
+              off, size, ctx.env.remote_addr,
+			  td_total, rate);
+	return ETIMEDOUT;
+}
+
+static int sendslot_ok(const struct timespec *tStart,
+		       const struct timespec *tNow,
+		       size_t size, struct cache_slot *slot)
+{
+	if (ctx.cfg.log_level >= LOG_LVL_DBG) {
+		const long td_total = cgit_ts_ms_sub(tNow, tStart);
+		const long rate = size / MY_MAX(1, td_total/1000);
+		cache_log("[cgit] send_slot status: sent cache %s (%s) %ld bytes) to "
+			  "client `%s` within [total %ldms, rate %ld Bps]\n",
+			  slot->cache_name, slot->key,
+			  size, ctx.env.remote_addr, td_total, rate);
+	}
+	return 0;
+}
+
+static int sendslot_ok2(const struct timespec *tStart, size_t size, struct cache_slot *slot)
+{
+	if (ctx.cfg.log_level >= LOG_LVL_DBG) {
+		struct timespec tNow;
+		return sendslot_ok(tStart, cgit_ts_current(&tNow), size, slot);
+	}
+	return 0;
+}
+
+static ssize_t write_in_full_to(int fd, const void *buf, size_t count, off_t *total_out,
+				const struct timespec *tStart,
+				struct timespec *tLastSend, long to_max)
+{
+	if (!count) {
+		return 0;
+	}
+	const char *p = buf;
+	ssize_t total = 0;
+	struct timespec tNow = *tLastSend;
+
+	do {
+		if (cgit_ts_ms_sub(&tNow, tLastSend) >= (long)ctx.cfg.client_io_idle_timeout) {
+			errno = ETIMEDOUT;
+			return -2;
+		}
+		if (cgit_ts_ms_sub(&tNow, tStart) > to_max) {
+			errno = ETIMEDOUT;
+			return -3;
+		}
+
+		ssize_t written = write(fd, p, MY_MIN(count, MAX_IO_SIZE));
+		cgit_ts_current(&tNow);
+		if (written < 0) {
+			if (errno == EINTR)
+				continue;
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				struct pollfd pfd;
+				pfd.fd = fd;
+				pfd.events = POLLOUT;
+				// no need to check for errors,
+				// subsequent read/write will detect unrecoverable errors
+				poll(&pfd, 1, -1);
+				continue;
+			}
+			return -1;
+		} else if (written > 0) {
+			*total_out += written;
+			count -= written;
+			p += written;
+			total += written;
+			*tLastSend = tNow;
+			if (!count)
+				return total;
+		}
+	} while (1);
+}
+
 /* Print the content of the active cache slot (but skip the key). */
 static int print_slot(struct cache_slot *slot)
 {
-	off_t off;
+	struct timespec tStart;
+	cgit_ts_current(&tStart);
+	struct timespec tLastSend = tStart;
+	struct timespec tNow = tStart;
+
+	off_t off = slot->keylen + 1;
+	off_t size = slot->cache_st.st_size;
+
+	if (!size) {
+		return sendslot_ok(&tStart, &tNow, size, slot);
+	}
+	const long to_min_rate =
+		MY_MAX(ctx.cfg.client_io_idle_timeout, (size / (long)ctx.cfg.client_io_min_rate) * 1000L);
+
 #ifdef HAVE_LINUX_SENDFILE
-	off_t size;
-#endif
-
-	off = slot->keylen + 1;
-
-#ifdef HAVE_LINUX_SENDFILE
-	size = slot->cache_st.st_size;
-
 	do {
-		ssize_t ret;
-		ret = sendfile(STDOUT_FILENO, slot->cache_fd, &off, size - off);
-		if (ret < 0) {
+		if (cgit_ts_ms_sub(&tNow, &tLastSend) >= (long)ctx.cfg.client_io_idle_timeout)
+			return sendslot_to_idle(&tStart, &tLastSend, &tNow, off, size, slot);
+		if (cgit_ts_ms_sub(&tNow, &tStart) > to_min_rate)
+			return sendslot_to_minrate(&tStart, &tNow, off, size, slot);
+
+		ssize_t count =
+			sendfile(STDOUT_FILENO, slot->cache_fd, &off, size - off);
+		cgit_ts_current(&tNow);
+		if (count < 0) {
 			if (errno == EAGAIN || errno == EINTR)
 				continue;
 			/* Fall back to read/write on EINVAL or ENOSYS */
 			if (errno == EINVAL || errno == ENOSYS)
 				break;
 			return errno;
+		} else if (count > 0) {
+			tLastSend = tNow;
+			if (off == size)
+				return sendslot_ok(&tStart, &tNow, size, slot);
 		}
-		if (off == size)
-			return 0;
 	} while (1);
 #endif
 
@@ -115,14 +234,26 @@ static int print_slot(struct cache_slot *slot)
 		return errno;
 
 	do {
-		ssize_t ret;
-		ret = xread(slot->cache_fd, slot->buf, sizeof(slot->buf));
-		if (ret < 0)
+		ssize_t count = xread(slot->cache_fd, slot->buf, sizeof(slot->buf));
+		if (count < 0)
 			return errno;
-		if (ret == 0)
-			return 0;
-		if (write_in_full(STDOUT_FILENO, slot->buf, ret) < 0)
+
+		ssize_t res;
+		if ((res = write_in_full_to(STDOUT_FILENO, slot->buf, count, &off,
+					    &tStart, &tLastSend, to_min_rate)) < 0)
+		{
+			if (ETIMEDOUT == errno) {
+				cgit_ts_current(&tNow);
+				if (-2 == res)
+					return sendslot_to_idle(&tStart, &tLastSend, &tNow, off, size, slot);
+				else if (-3 == res)
+					return sendslot_to_minrate(&tStart, &tNow, off, size, slot);
+			}
 			return errno;
+		}
+		if (off == size || !count /* should be redundant */) {
+			return sendslot_ok2(&tStart, size, slot);
+		}
 	} while (1);
 }
 

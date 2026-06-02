@@ -129,7 +129,9 @@ static void config_cb(const char *name, const char *value)
 {
 	const char *arg;
 
-	if (!strcmp(name, "section"))
+	if (!strcmp(name, "log-level"))
+		ctx.cfg.log_level = atoi(value);
+	else if (!strcmp(name, "section"))
 		ctx.cfg.section = strdup_first_line(value);
 	else if (!strcmp(name, "repo.url"))
 		ctx.repo = cgit_add_repo(value);
@@ -215,6 +217,10 @@ static void config_cb(const char *name, const char *value)
 		ctx.cfg.cache_scanrc_ttl = atoi(value);
 	else if (!strcmp(name, "cache-static-ttl"))
 		ctx.cfg.cache_static_ttl = atoi(value);
+	else if (!strcmp(name, "client-io-idle-timeout"))
+		ctx.cfg.client_io_idle_timeout = atoi(value)*1000; // s -> ms
+	else if (!strcmp(name, "client-io-min-rate"))
+		ctx.cfg.client_io_min_rate = atoi(value);
 	else if (!strcmp(name, "cache-dynamic-ttl"))
 		ctx.cfg.cache_dynamic_ttl = atoi(value);
 	else if (!strcmp(name, "cache-about-ttl"))
@@ -251,15 +257,16 @@ static void config_cb(const char *name, const char *value)
 		ctx.cfg.max_commit_count = atoi(value);
 	else if (!strcmp(name, "project-list"))
 		ctx.cfg.project_list = strdup_first_line(expand_macros(value));
-	else if (!strcmp(name, "scan-path"))
+	else if (!strcmp(name, "scan-path")) {
+		ctx.cfg.scan_path = strdup_first_line(expand_macros(value));
 		if (ctx.cfg.cache_size)
-			process_cached_repolist(expand_macros(value));
+			process_cached_repolist(ctx.cfg.scan_path);
 		else if (ctx.cfg.project_list)
-			scan_projects(expand_macros(value),
+			scan_projects(ctx.cfg.scan_path,
 				      ctx.cfg.project_list);
 		else
-			scan_tree(expand_macros(value));
-	else if (!strcmp(name, "scan-hidden-path"))
+			scan_tree(ctx.cfg.scan_path);
+	} else if (!strcmp(name, "scan-hidden-path"))
 		ctx.cfg.scan_hidden_path = atoi(value);
 	else if (!strcmp(name, "section-from-path"))
 		ctx.cfg.section_from_path = atoi(value);
@@ -381,6 +388,8 @@ static void prepare_context(void)
 	ctx.cfg.cache_scanrc_ttl = 15;
 	ctx.cfg.cache_dynamic_ttl = 5;
 	ctx.cfg.cache_static_ttl = -1;
+	ctx.cfg.client_io_idle_timeout = 20000;
+	ctx.cfg.client_io_min_rate = 500;
 	ctx.cfg.case_sensitive_sort = 1;
 	ctx.cfg.branch_sort = 0;
 	ctx.cfg.commit_sort = 0;
@@ -426,6 +435,7 @@ static void prepare_context(void)
 	ctx.env.server_port = getenv("SERVER_PORT");
 	ctx.env.http_cookie = getenv("HTTP_COOKIE");
 	ctx.env.http_referer = getenv("HTTP_REFERER");
+	ctx.env.remote_addr = getenv("REMOTE_ADDR");
 	ctx.env.content_length = getenv("CONTENT_LENGTH") ? strtoul(getenv("CONTENT_LENGTH"), NULL, 10) : 0;
 	ctx.env.authenticated = 0;
 	ctx.page.mimetype = "text/html";
@@ -867,6 +877,15 @@ static void print_repolist(FILE *f, struct cgit_repolist *list, int start)
 	for (i = start; i < list->count; i++)
 		print_repo(f, &list->repos[i]);
 }
+static void print_config(FILE *f, const char *prefix)
+{
+	// TODO: May need to be completed, if desired to be functional
+	fprintf(f, "%slog-level=%d\n", prefix, ctx.cfg.log_level);
+	fprintf(f, "%sproject-list=%s\n", prefix, ctx.cfg.project_list);
+	fprintf(f, "%sscan-path=%s\n", prefix, ctx.cfg.scan_path);
+	fprintf(f, "%sclient-io-idle-timeout=%d\n", prefix, ctx.cfg.client_io_idle_timeout);
+	fprintf(f, "%sclient-io-min-rate=%ld\n", prefix, ctx.cfg.client_io_min_rate);
+}
 
 /* Scan 'path' for git repositories, save the resulting repolist in 'cached_rc'
  * and return 0 on success.
@@ -1005,12 +1024,14 @@ static void cgit_parse_args(int argc, const char **argv)
 			 * NOTE: We assume that there aren't more than 8
 			 * different snapshot formats supported by cgit...
 			 */
+			ctx.cfg.scan_path = strdup_first_line(arg);
 			ctx.cfg.snapshots = 0xFF;
 			scan++;
 			scan_tree(arg);
 		}
 	}
 	if (scan) {
+		print_config(stdout, "[cgit] scan: ");
 		qsort(cgit_repolist.repos, cgit_repolist.count,
 			sizeof(struct cgit_repo), cmp_repos);
 		print_repolist(stdout, &cgit_repolist, 0);
@@ -1063,6 +1084,8 @@ int cmd_main(int argc, const char **argv)
 
 	cgit_parse_args(argc, argv);
 	parse_configfile(expand_macros(ctx.env.cgit_config), config_cb);
+	if (ctx.cfg.log_level >= LOG_LVL_VERBOSE)
+		print_config(stderr, "[cgit] init: ");
 	ctx.repo = NULL;
 	http_parse_querystring(ctx.qry.raw, querystring_cb);
 

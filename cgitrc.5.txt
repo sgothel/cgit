@@ -100,6 +100,14 @@ cache-static-ttl::
 	version of repository pages accessed with a fixed SHA1. See also:
 	"CACHE". Default value: -1".
 
+client-io-idle-timeout::
+	IDLE timeout in seconds between sending/receiving chunks
+	of the cached body to/from the client. Default value: "20" (20s).
+
+client-io-min-rate::
+	Minimum transfer rate in Bps for sending/receiving a full cached
+	body to/from the client. Default value "500" (500 Bps).
+
 clone-prefix::
 	Space-separated list of common prefixes which, when combined with a
 	repository url, generates valid clone urls for the repository. This
@@ -456,6 +464,12 @@ virtual-root::
 	NOTE: cgit has recently learned how to use PATH_INFO to achieve the
 	same kind of virtual urls, so this option will probably be deprecated.
 
+log-level::
+	Specifies the logging level.
+	Zero only logs errors (LOG_LVL_ERR), greater-equal 50 adds warnings (LOG_LVL_WARN),
+	greater-equal 75 adds debug messages
+	and greater-equal 100 adds verbose information (LOG_LVL_VERBOSE).
+	Default value: "0" (error logging only).
 
 REPOSITORY SETTINGS
 -------------------

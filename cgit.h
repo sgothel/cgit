@@ -193,7 +193,12 @@ struct cgit_query {
 	char *vpath;
 };
 
+typedef enum {
+	LOG_LVL_ERR=0, LOG_LVL_WARN=50, LOG_LVL_DBG=75, LOG_LVL_VERBOSE=100
+} log_level_t;
+
 struct cgit_config {
+	int log_level; ///< defaults to zero
 	char *agefile;
 	char *cache_root;
 	char *clone_prefix;
@@ -207,6 +212,7 @@ struct cgit_config {
 	char *mimetype_file;
 	char *module_link;
 	char *project_list;
+	char *scan_path;
 	struct string_list readme;
 	struct string_list css;
 	char *robots;
@@ -227,6 +233,10 @@ struct cgit_config {
 	int cache_static_ttl;
 	int cache_about_ttl;
 	int cache_snapshot_ttl;
+	/* idle timeout in milliseconds between sending/receiving chunks of the cached body to/from the client. Defaults to 20000ms. */
+	int client_io_idle_timeout;
+	/* minimum transfer rate in Bps for sending/receiving a full cached body to/from the client. Defaults to 500 Bps. */
+	int client_io_min_rate;
 	int case_sensitive_sort;
 	int embedded;
 	int enable_filter_overrides;
@@ -302,6 +312,7 @@ struct cgit_environment {
 	const char *server_port;
 	const char *http_cookie;
 	const char *http_referer;
+	const char *remote_addr;
 	unsigned int content_length;
 	int authenticated;
 };
@@ -400,5 +411,14 @@ extern char *strdup_first_line(const char *txt);
 extern char *expand_macros(const char *txt);
 
 extern char *get_mimetype_for_filename(const char *filename);
+
+extern struct timespec *cgit_ts_normalize(struct timespec *ts);
+extern long cgit_ts_to_ms(const struct timespec *ts);
+extern struct timespec *cgit_ts_add(struct timespec *tsr, const struct timespec *ts1, const struct timespec *ts2);
+extern struct timespec *cgit_ts_sub(struct timespec *tsr, const struct timespec *ts1, const struct timespec *ts2);
+extern long cgit_ts_ms_sub(const struct timespec *ts1, const struct timespec *ts2);
+extern int cgit_ts_cmp(const struct timespec* lhs, const struct timespec* rhs);
+extern struct timespec *cgit_ts_current(struct timespec *ts);
+extern long cgit_ts_ms_sub_current(const struct timespec *ts);
 
 #endif /* CGIT_H */

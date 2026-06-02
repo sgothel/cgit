@@ -6,6 +6,9 @@
  *   (see COPYING for full license text)
  */
 
+#include <limits.h>
+#include <time.h>
+
 #define USE_THE_REPOSITORY_VARIABLE
 
 #include "cgit.h"
@@ -592,4 +595,93 @@ char *get_mimetype_for_filename(const char *filename)
 	}
 	fclose(file);
 	return NULL;
+}
+
+#define NS_PER_SEC 1000000000
+#define NS_PER_MS 1000000
+#define MS_PER_SEC 1000
+#define LONG_SEC_MAX_FOR_MS (LONG_MAX / MS_PER_SEC)
+
+/**
+ * Normalize tv_nsec with its absolute range [0..1'000'000'000[ or [0..1'000'000'000)
+ * and having same sign as tv_sec.
+ *
+ * Used after arithmetic operations.
+ *
+ * @returns passed timespec instance
+ */
+struct timespec *cgit_ts_normalize(struct timespec *ts) {
+    if ( 0 != ts->tv_nsec ) {
+        if ( labs(ts->tv_nsec) >= NS_PER_SEC ) {
+            const int64_t c = ts->tv_nsec / NS_PER_SEC;
+            ts->tv_nsec -= c * NS_PER_SEC;
+            ts->tv_sec += c;
+        }
+        if ( ts->tv_nsec < 0 && ts->tv_sec >= 1 ) {
+            ts->tv_nsec += NS_PER_SEC;
+            ts->tv_sec -= 1;
+        } else if ( ts->tv_nsec > 0 && ts->tv_sec <= -1 ) {
+            ts->tv_nsec -= NS_PER_SEC;
+            ts->tv_sec += 1;
+        }
+    }
+	return ts;
+}
+
+long cgit_ts_to_ms(const struct timespec *ts)
+{
+	if ( ts->tv_sec < 0 || ts->tv_nsec < 0 ) {
+	    return 0;
+	}
+	return ts->tv_sec < LONG_SEC_MAX_FOR_MS ? ts->tv_sec * MS_PER_SEC + ts->tv_nsec / NS_PER_MS : LONG_MAX;
+}
+
+struct timespec *cgit_ts_add(struct timespec *tsr, const struct timespec *ts1, const struct timespec *ts2)
+{
+	tsr->tv_nsec = ts1->tv_nsec + ts2->tv_nsec;  // we allow the 'overflow' over 1'000'000'000, fitting into type and normalize() later
+	tsr->tv_sec  = ts1->tv_sec  + ts2->tv_sec;
+	return cgit_ts_normalize(tsr);
+}
+
+struct timespec *cgit_ts_sub(struct timespec *tsr, const struct timespec *ts1, const struct timespec *ts2)
+{
+	tsr->tv_nsec = ts1->tv_nsec - ts2->tv_nsec;  // we allow the 'overflow' over 1'000'000'000, fitting into type and normalize() later
+	tsr->tv_sec  = ts1->tv_sec  - ts2->tv_sec;
+	return cgit_ts_normalize(tsr);
+}
+
+long cgit_ts_ms_sub(const struct timespec *ts1, const struct timespec *ts2)
+{
+	struct timespec tsr;
+	return cgit_ts_to_ms( cgit_ts_sub(&tsr, ts1, ts2) );
+}
+
+/**
+ * Returns an integer indicating the result of the comparison, as follows:
+ * • 0, if the lhs and rhs are equal;
+ * • a negative value if lhs is less than rhs;
+ * • a positive value if lhs is greater than rhs.
+ */
+int cgit_ts_cmp(const struct timespec* lhs, const struct timespec* rhs) {
+    if ( lhs->tv_sec == rhs->tv_sec ) {
+        return lhs->tv_nsec == rhs->tv_nsec ? 0 : (lhs->tv_nsec < rhs->tv_nsec ? -1 : 1);
+    }
+    return lhs->tv_sec < rhs->tv_sec ? -1 : 1;
+}
+
+/**
+ * Gets the current monotonic clock, good enough to measure time delta but not wallclock.
+ * @param ts timespec storage
+ * @return the passed timespec storage
+ */
+struct timespec *cgit_ts_current(struct timespec *ts)
+{
+	clock_gettime(CLOCK_MONOTONIC, ts);
+	return ts;
+}
+
+long cgit_ts_ms_sub_current(const struct timespec *ts)
+{
+	struct timespec tNow, tDiff;
+	return cgit_ts_to_ms( cgit_ts_sub(&tDiff, cgit_ts_current(&tNow), ts) );
 }
