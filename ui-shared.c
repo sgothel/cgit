@@ -886,22 +886,56 @@ void cgit_print_docend(void)
 	html("</body>\n</html>\n");
 }
 
-void cgit_print_error_page(int code, const char *msg, const char *fmt, ...)
+static const char *cgit_get_http_statusmsg(int code) {
+	switch (code) {
+		case 200: return "OK";
+		case 400: return "Bad request";
+		case 403: return "Forbidden";
+		case 404: return "Not found";
+		case 408: return "Request timeout";
+		case 418: return "I'm a teapot";
+		case 429: return "Too Many Requests";
+		case 500: return "Internal server error";
+		case 503: return "Service unavailable";
+		default: return "See response code";
+	}
+}
+
+void cgit_print_error_page(int code, const char *fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
-	cgit_vprint_error_page(code, msg, fmt, ap);
+	cgit_vprint_error_page(code, fmt, ap);
 	va_end(ap);
 }
 
-void cgit_vprint_error_page(int code, const char *msg, const char *fmt, va_list ap)
+void cgit_vprint_error_page(int code, const char *fmt, va_list ap)
 {
+	char title[40];
+	snprintf(title, sizeof(title), "%d - cgit error", code);
+	ctx.page.title = title;
+	ctx.page.expires = ctx.cfg.cache_dynamic_ttl;
+	ctx.page.status = code;
+	ctx.page.statusmsg = cgit_get_http_statusmsg(code);
+	cgit_print_layout_start();
+	cgit_vprint_error(fmt, ap);
+	cgit_print_layout_end();
+	ctx.page.title = "cgit error";
+}
+
+void cgit_print_error_page0(int code)
+{
+	char title[40];
+	const char * msg = cgit_get_http_statusmsg(code);
+	snprintf(title, sizeof(title), "%d - cgit error", code);
+	ctx.page.title = title;
 	ctx.page.expires = ctx.cfg.cache_dynamic_ttl;
 	ctx.page.status = code;
 	ctx.page.statusmsg = msg;
 	cgit_print_layout_start();
-	cgit_vprint_error(fmt, ap);
+	cgit_print_error(msg); // NOLINT: -Wformat-security
 	cgit_print_layout_end();
+	ctx.page.title = "cgit error";
 }
 
 void cgit_print_layout_start(void)

@@ -378,12 +378,12 @@ void cgit_show_stats(void)
 
 	i = cgit_find_stats_period(code, &period);
 	if (!i) {
-		cgit_print_error_page(404, "Not found",
+		cgit_print_error_page(404,
 			"Unknown statistics type: %c", code[0]);
 		return;
 	}
 	if (i > ctx.repo->max_stats) {
-		cgit_print_error_page(400, "Bad request",
+		cgit_print_error_page(400,
 			"Statistics type disabled: %s", period->name);
 		return;
 	}

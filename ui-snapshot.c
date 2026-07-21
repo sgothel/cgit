@@ -159,12 +159,12 @@ static int make_snapshot(const struct cgit_snapshot_format *format,
 	struct object_id oid;
 
 	if (repo_get_oid(the_repository, hex, &oid)) {
-		cgit_print_error_page(404, "Not found",
+		cgit_print_error_page(404,
 				"Bad object id: %s", hex);
 		return 1;
 	}
 	if (!lookup_commit_reference(the_repository, &oid)) {
-		cgit_print_error_page(400, "Bad request",
+		cgit_print_error_page(400,
 				"Not a commit reference: %s", hex);
 		return 1;
 	}
@@ -187,14 +187,14 @@ static int write_sig(const struct cgit_snapshot_format *format,
 	char *buf;
 
 	if (!note) {
-		cgit_print_error_page(404, "Not found",
+		cgit_print_error_page(404,
 				"No signature for %s", archive);
 		return 0;
 	}
 
 	buf = odb_read_object(the_repository->objects, note, &type, &size);
 	if (!buf) {
-		cgit_print_error_page(404, "Not found", "Not found");
+		cgit_print_error_page0(404);
 		return 0;
 	}
 
@@ -271,7 +271,7 @@ void cgit_print_snapshot(const char *head, const char *hex,
 	char *prefix = NULL;
 
 	if (!filename) {
-		cgit_print_error_page(400, "Bad request",
+		cgit_print_error_page(400,
 				"No snapshot name specified");
 		return;
 	}
@@ -287,7 +287,7 @@ void cgit_print_snapshot(const char *head, const char *hex,
 
 	f = get_format(filename);
 	if (!f || (!sig_filename && !(ctx.repo->snapshots & cgit_snapshot_format_bit(f)))) {
-		cgit_print_error_page(400, "Bad request",
+		cgit_print_error_page(400,
 				"Unsupported snapshot format: %s", filename);
 		return;
 	}
@@ -295,7 +295,7 @@ void cgit_print_snapshot(const char *head, const char *hex,
 	if (!hex && dwim) {
 		hex = get_ref_from_filename(ctx.repo, filename, f);
 		if (hex == NULL) {
-			cgit_print_error_page(404, "Not found", "Not found");
+			cgit_print_error_page0(404);
 			return;
 		}
 		prefix = xstrdup(filename);

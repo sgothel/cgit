@@ -123,14 +123,14 @@ static void print_object(const struct object_id *oid, const char *path,
 
 	type = odb_read_object_info(the_repository->objects, oid, &size);
 	if (type == OBJ_BAD) {
-		cgit_print_error_page(404, "Not found", "Bad object name: %s",
+		cgit_print_error_page(404, "Bad object name: %s",
 				      oid_to_hex(oid));
 		return;
 	}
 
 	buf = odb_read_object(the_repository->objects, oid, &type, &size);
 	if (!buf) {
-		cgit_print_error_page(500, "Internal server error",
+		cgit_print_error_page(500,
 			"Error reading object %s", oid_to_hex(oid));
 		return;
 	}
@@ -290,13 +290,13 @@ void cgit_print_blame(void)
 		rev = ctx.qry.head;
 
 	if (repo_get_oid(the_repository, rev, &oid)) {
-		cgit_print_error_page(404, "Not found",
+		cgit_print_error_page(404,
 			"Invalid revision name: %s", rev);
 		return;
 	}
 	commit = lookup_commit_reference(the_repository, &oid);
 	if (!commit || repo_parse_commit(the_repository, commit)) {
-		cgit_print_error_page(404, "Not found",
+		cgit_print_error_page(404,
 			"Invalid commit reference: %s", rev);
 		return;
 	}
@@ -308,9 +308,9 @@ void cgit_print_blame(void)
 	read_tree(the_repository, repo_get_commit_tree(the_repository, commit),
 		  &paths, walk_tree, &walk_tree_ctx);
 	if (!walk_tree_ctx.state)
-		cgit_print_error_page(404, "Not found", "Not found");
+		cgit_print_error_page0(404);
 	else if (walk_tree_ctx.state == 2)
-		cgit_print_error_page(404, "No blame for folders",
+		cgit_print_error_page(404,
 			"Blame is not available for folders.");
 
 	free(walk_tree_ctx.curr_rev);

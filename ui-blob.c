@@ -135,13 +135,13 @@ void cgit_print_blob(const char *hex, char *path, const char *head, int file_onl
 
 	if (hex) {
 		if (get_oid_hex(hex, &oid)) {
-			cgit_print_error_page(400, "Bad request",
+			cgit_print_error_page(400,
 					"Bad hex value: %s", hex);
 			return;
 		}
 	} else {
 		if (repo_get_oid(the_repository, head, &oid)) {
-			cgit_print_error_page(404, "Not found",
+			cgit_print_error_page(404,
 					"Bad ref: %s", head);
 			return;
 		}
@@ -157,14 +157,14 @@ void cgit_print_blob(const char *hex, char *path, const char *head, int file_onl
 	}
 
 	if (type == OBJ_BAD) {
-		cgit_print_error_page(404, "Not found",
+		cgit_print_error_page(404,
 				"Bad object name: %s", hex);
 		return;
 	}
 
 	buf = odb_read_object(the_repository->objects, &oid, &type, &size);
 	if (!buf) {
-		cgit_print_error_page(500, "Internal server error",
+		cgit_print_error_page(500,
 				"Error reading object %s", hex);
 		return;
 	}

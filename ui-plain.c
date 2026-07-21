@@ -26,13 +26,13 @@ static int print_object(const struct object_id *oid, const char *path)
 
 	type = odb_read_object_info(the_repository->objects, oid, &size);
 	if (type == OBJ_BAD) {
-		cgit_print_error_page(404, "Not found", "Not found");
+		cgit_print_error_page0(404);
 		return 0;
 	}
 
 	buf = odb_read_object(the_repository->objects, oid, &type, &size);
 	if (!buf) {
-		cgit_print_error_page(404, "Not found", "Not found");
+		cgit_print_error_page0(404);
 		return 0;
 	}
 
@@ -184,12 +184,12 @@ void cgit_print_plain(void)
 		rev = ctx.qry.head;
 
 	if (repo_get_oid(the_repository, rev, &oid)) {
-		cgit_print_error_page(404, "Not found", "Not found");
+		cgit_print_error_page0(404);
 		return;
 	}
 	commit = lookup_commit_reference(the_repository, &oid);
 	if (!commit || repo_parse_commit(the_repository, commit)) {
-		cgit_print_error_page(404, "Not found", "Not found");
+		cgit_print_error_page0(404);
 		return;
 	}
 	if (!path_items.match) {
@@ -203,7 +203,7 @@ void cgit_print_plain(void)
 	read_tree(the_repository, repo_get_commit_tree(the_repository, commit),
 		  &paths, walk_tree, &walk_tree_ctx);
 	if (!walk_tree_ctx.match)
-		cgit_print_error_page(404, "Not found", "Not found");
+		cgit_print_error_page0(404);
 	else if (walk_tree_ctx.match == 2)
 		print_dir_tail();
 }

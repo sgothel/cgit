@@ -69,7 +69,7 @@ static void blame_fn(void)
 	if (ctx.repo->enable_blame)
 		cgit_print_blame();
 	else
-		cgit_print_error_page(403, "Forbidden", "Blame is disabled");
+		cgit_print_error_page(403, "Blame is disabled");
 }
 
 static void blob_fn(void)

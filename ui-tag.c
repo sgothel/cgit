@@ -51,13 +51,13 @@ void cgit_print_tag(char *revname)
 
 	strbuf_addf(&fullref, "refs/tags/%s", revname);
 	if (repo_get_oid(the_repository, fullref.buf, &oid)) {
-		cgit_print_error_page(404, "Not found",
+		cgit_print_error_page(404,
 			"Bad tag reference: %s", revname);
 		goto cleanup;
 	}
 	obj = parse_object(the_repository, &oid);
 	if (!obj) {
-		cgit_print_error_page(500, "Internal server error",
+		cgit_print_error_page(500,
 			"Bad object id: %s", oid_to_hex(&oid));
 		goto cleanup;
 	}
@@ -67,7 +67,7 @@ void cgit_print_tag(char *revname)
 
 		tag = lookup_tag(the_repository, &oid);
 		if (!tag || parse_tag(the_repository, tag) || !(info = cgit_parse_tag(tag))) {
-			cgit_print_error_page(500, "Internal server error",
+			cgit_print_error_page(500,
 				"Bad tag object: %s", revname);
 			goto cleanup;
 		}

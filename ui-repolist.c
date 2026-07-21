@@ -274,7 +274,7 @@ void cgit_print_repolist(void)
 	int sorted = 0;
 
 	if (!any_repos_visible()) {
-		cgit_print_error_page(404, "Not found", "No repositories found");
+		cgit_print_error_page(404, "No repositories found");
 		return;
 	}
 

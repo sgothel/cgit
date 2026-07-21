@@ -639,8 +639,7 @@ static int prepare_repo_cmd(int nongit)
 	if (repo_get_oid(the_repository, ctx.qry.head, &oid)) {
 		char *old_head = ctx.qry.head;
 		ctx.qry.head = xstrdup(ctx.repo->defbranch);
-		cgit_print_error_page(404, "Not found",
-				"Invalid branch: %s", old_head);
+		cgit_print_error_page(404, "Invalid branch: %s", old_head);
 		free(old_head);
 		return 1;
 	}
@@ -736,20 +735,17 @@ static void process_request(void)
 
 	cmd = cgit_get_cmd();
 	if (!cmd) {
-		ctx.page.title = "cgit error";
-		cgit_print_error_page(404, "Not found", "Invalid request");
+		cgit_print_error_page(404, "Invalid request"); // FIXME: 400?
 		return;
 	}
 
 	if (!ctx.cfg.enable_http_clone && cmd->is_clone) {
-		ctx.page.title = "cgit error";
-		cgit_print_error_page(404, "Not found", "Invalid request");
+		cgit_print_error_page(404, "Invalid request"); // FIXME: 400?
 		return;
 	}
 
 	if (cmd->want_repo && !ctx.repo) {
-		cgit_print_error_page(400, "Bad request",
-				"No repository selected");
+		cgit_print_error_page(400, "No repository selected");
 		return;
 	}
 
@@ -1047,7 +1043,7 @@ static int calc_ttl(void)
 
 static NORETURN void cgit_die_routine(const char *msg, va_list params)
 {
-	cgit_vprint_error_page(400, "Bad request", msg, params);
+	cgit_vprint_error_page(400, msg, params);
 	exit(0);
 }
 

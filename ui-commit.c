@@ -29,13 +29,13 @@ void cgit_print_commit(char *hex, const char *prefix)
 		hex = ctx.qry.head;
 
 	if (repo_get_oid(the_repository, hex, &oid)) {
-		cgit_print_error_page(400, "Bad request",
+		cgit_print_error_page(400,
 				"Bad object id: %s", hex);
 		return;
 	}
 	commit = lookup_commit_reference(the_repository, &oid);
 	if (!commit) {
-		cgit_print_error_page(404, "Not found",
+		cgit_print_error_page(404,
 				"Bad commit reference: %s", hex);
 		return;
 	}

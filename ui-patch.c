@@ -34,25 +34,25 @@ void cgit_print_patch(const char *new_rev, const char *old_rev,
 		new_rev = ctx.qry.head;
 
 	if (repo_get_oid(the_repository, new_rev, &new_rev_oid)) {
-		cgit_print_error_page(404, "Not found",
+		cgit_print_error_page(404,
 				"Bad object id: %s", new_rev);
 		return;
 	}
 	commit = lookup_commit_reference(the_repository, &new_rev_oid);
 	if (!commit) {
-		cgit_print_error_page(404, "Not found",
+		cgit_print_error_page(404,
 				"Bad commit reference: %s", new_rev);
 		return;
 	}
 
 	if (old_rev) {
 		if (repo_get_oid(the_repository, old_rev, &old_rev_oid)) {
-			cgit_print_error_page(404, "Not found",
+			cgit_print_error_page(404,
 					"Bad object id: %s", old_rev);
 			return;
 		}
 		if (!lookup_commit_reference(the_repository, &old_rev_oid)) {
-			cgit_print_error_page(404, "Not found",
+			cgit_print_error_page(404,
 					"Bad commit reference: %s", old_rev);
 			return;
 		}
