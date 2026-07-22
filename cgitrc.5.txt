@@ -100,6 +100,20 @@ cache-static-ttl::
 	version of repository pages accessed with a fixed SHA1. See also:
 	"CACHE". Default value: -1".
 
+cache-lock-fail::
+	Cache lock fail action as http-response code.
+	200 returns un-cached processed content (OK),
+	otherwise an error page is served. Default value: "200" (OK).
+
+cache-lock-retry::
+	Cache lock fail http-header `Retry-After` value in seconds,
+	used if cache-lock-fail is not 200 (OK) and serves an error page.
+	Default value: "30" (30s).
+
+cache-lock-timeout::
+	Timeout in millisseconds to acquire the cache lock-file
+	against concurrent processes. Default value: "1000" (1000ms).
+
 client-io-idle-timeout::
 	IDLE timeout in seconds between sending/receiving chunks
 	of the cached body to/from the client. Default value: "20" (20s).

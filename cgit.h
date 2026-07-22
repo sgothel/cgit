@@ -233,6 +233,12 @@ struct cgit_config {
 	int cache_static_ttl;
 	int cache_about_ttl;
 	int cache_snapshot_ttl;
+	/* cache lock fail action as http-response code. 200 returns un-cached processed content, otherwise an error page of same code is served. Defaults to 200 (OK). */
+	int cache_lock_fail;
+	/* cache lock fail http-header `Retry-After` value in seconds, used if cache-lock-fail is not 200 (OK) and serves an error page. Default to 30s. */
+	int cache_lock_retry;
+	/* cache lock timeout in milliseconds to acquire the cache lock-file against concurrent processes. Defaults to 1000ms. */
+	int cache_lock_timeout;
 	/* idle timeout in milliseconds between sending/receiving chunks of the cached body to/from the client. Defaults to 20000ms. */
 	int client_io_idle_timeout;
 	/* minimum transfer rate in Bps for sending/receiving a full cached body to/from the client. Defaults to 500 Bps. */
@@ -290,6 +296,7 @@ struct cgit_page {
 	time_t modified;
 	time_t expires;
 	size_t size;
+	int retry_after;
 	const char *mimetype;
 	const char *charset;
 	const char *filename;

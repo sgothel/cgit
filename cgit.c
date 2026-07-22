@@ -217,6 +217,12 @@ static void config_cb(const char *name, const char *value)
 		ctx.cfg.cache_scanrc_ttl = atoi(value);
 	else if (!strcmp(name, "cache-static-ttl"))
 		ctx.cfg.cache_static_ttl = atoi(value);
+	else if (!strcmp(name, "cache-lock-fail"))
+		ctx.cfg.cache_lock_fail = atoi(value);
+	else if (!strcmp(name, "cache-lock-retry"))
+		ctx.cfg.cache_lock_retry = atoi(value);
+	else if (!strcmp(name, "cache-lock-timeout"))
+		ctx.cfg.cache_lock_timeout = atoi(value); // ms
 	else if (!strcmp(name, "client-io-idle-timeout"))
 		ctx.cfg.client_io_idle_timeout = atoi(value)*1000; // s -> ms
 	else if (!strcmp(name, "client-io-min-rate"))
@@ -388,6 +394,9 @@ static void prepare_context(void)
 	ctx.cfg.cache_scanrc_ttl = 15;
 	ctx.cfg.cache_dynamic_ttl = 5;
 	ctx.cfg.cache_static_ttl = -1;
+	ctx.cfg.cache_lock_fail = 200;
+	ctx.cfg.cache_lock_retry = 30;
+	ctx.cfg.cache_lock_timeout = 1000;
 	ctx.cfg.client_io_idle_timeout = 20000;
 	ctx.cfg.client_io_min_rate = 500;
 	ctx.cfg.case_sensitive_sort = 1;
@@ -883,8 +892,11 @@ static void print_config(FILE *f, const char *prefix)
 	fprintf(f, "%slog-level=%d\n", prefix, ctx.cfg.log_level);
 	fprintf(f, "%sproject-list=%s\n", prefix, ctx.cfg.project_list);
 	fprintf(f, "%sscan-path=%s\n", prefix, ctx.cfg.scan_path);
+	fprintf(f, "%scache-lock-fail=%d\n", prefix, ctx.cfg.cache_lock_fail);
+	fprintf(f, "%scache-lock-retry=%d\n", prefix, ctx.cfg.cache_lock_retry);
+	fprintf(f, "%scache-lock-timeout=%d\n", prefix, ctx.cfg.cache_lock_timeout);
 	fprintf(f, "%sclient-io-idle-timeout=%d\n", prefix, ctx.cfg.client_io_idle_timeout);
-	fprintf(f, "%sclient-io-min-rate=%ld\n", prefix, ctx.cfg.client_io_min_rate);
+	fprintf(f, "%sclient-io-min-rate=%d\n", prefix, ctx.cfg.client_io_min_rate);
 }
 
 /* Scan 'path' for git repositories, save the resulting repolist in 'cached_rc'

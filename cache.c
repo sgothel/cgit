@@ -16,6 +16,11 @@
 #include "cgit.h"
 #include "cache.h"
 #include "html.h"
+#include "ui-shared.h"
+#include <stdio.h>
+#include <fcntl.h>
+#include <time.h>
+#include <unistd.h>
 #ifdef HAVE_LINUX_SENDFILE
 #include <sys/sendfile.h>
 #endif
@@ -76,8 +81,7 @@ static int close_slot(struct cache_slot *slot)
 	if (slot->cache_fd > 0) {
 		if (close(slot->cache_fd))
 			err = errno;
-		else
-			slot->cache_fd = -1;
+		slot->cache_fd = -1;
 	}
 	return err;
 }
@@ -111,7 +115,7 @@ static int sendslot_to_minrate(const struct timespec *tStart,
 			  "cache %s (%s) (%ld/%ld bytes) to client `%s` "
 			  "within [total %ldms, rate %ld Bps]\n",
 			  ctx.cfg.client_io_min_rate, slot->cache_name, slot->key,
-              off, size, ctx.env.remote_addr,
+			  off, size, ctx.env.remote_addr,
 			  td_total, rate);
 	return ETIMEDOUT;
 }
@@ -212,8 +216,7 @@ static int print_slot(struct cache_slot *slot)
 		if (cgit_ts_ms_sub(&tNow, &tStart) > to_min_rate)
 			return sendslot_to_minrate(&tStart, &tNow, off, size, slot);
 
-		ssize_t count =
-			sendfile(STDOUT_FILENO, slot->cache_fd, &off, size - off);
+		ssize_t count = sendfile(STDOUT_FILENO, slot->cache_fd, &off, size - off);
 		cgit_ts_current(&tNow);
 		if (count < 0) {
 			if (errno == EAGAIN || errno == EINTR)
@@ -266,20 +269,6 @@ static int is_expired(struct cache_slot *slot)
 		return slot->cache_st.st_mtime + slot->ttl * 60 < time(NULL);
 }
 
-/* Check if the slot has been modified since we opened it.
- * NB: If stat() fails, we pretend the file is modified.
- */
-static int is_modified(struct cache_slot *slot)
-{
-	struct stat st;
-
-	if (stat(slot->cache_name, &st))
-		return 1;
-	return (st.st_ino != slot->cache_st.st_ino ||
-		st.st_mtime != slot->cache_st.st_mtime ||
-		st.st_size != slot->cache_st.st_size);
-}
-
 /* Close an open lockfile */
 static int close_lock(struct cache_slot *slot)
 {
@@ -287,17 +276,28 @@ static int close_lock(struct cache_slot *slot)
 	if (slot->lock_fd > 0) {
 		if (close(slot->lock_fd))
 			err = errno;
-		else
-			slot->lock_fd = -1;
+		slot->lock_fd = -1;
 	}
 	return err;
+}
+
+enum lock_file_op_t { UNLINK_LOCK_FILE=0, REPLACE_OLD_SLOT=1 };
+
+static int unlock_slot(struct cache_slot *slot, enum lock_file_op_t lock_file_op);
+
+static const char *to_string(enum lock_file_op_t lock_file_op) {
+	switch (lock_file_op) {
+		case UNLINK_LOCK_FILE: return "unlink";
+		case REPLACE_OLD_SLOT: return "replace";
+		default: return "undef";
+	}
 }
 
 /* Create a lockfile used to store the generated content for a cache
  * slot, and write the slot key + \0 into it.
  * Returns 0 on success and errno otherwise.
  */
-static int lock_slot(struct cache_slot *slot)
+static int lock_slot(struct cache_slot *slot, const struct timespec *tStart)
 {
 	struct flock lock = {
 		.l_type = F_WRLCK,
@@ -305,48 +305,147 @@ static int lock_slot(struct cache_slot *slot)
 		.l_start = 0,
 		.l_len = 0,
 	};
+	size_t wait_count = 0;
 
-	slot->lock_fd = open(slot->lock_name, O_RDWR | O_CREAT,
-			     S_IRUSR | S_IWUSR);
-	if (slot->lock_fd == -1)
-		return errno;
-	if (fcntl(slot->lock_fd, F_SETLK, &lock) < 0) {
+	if (0 == strncmp("cgit_test_key_no_lock", slot->key, 21)) {
+		cache_log("[cgit] Lock (%ldms): Test-Key: %s -> forced fail\n",
+			  cgit_ts_ms_sub_current(tStart), slot->key);
+		return ENOENT;
+	}
+	slot->lock_fd =
+	    open(slot->lock_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+	if (slot->lock_fd == -1) {
 		int saved_errno = errno;
-		close(slot->lock_fd);
-		slot->lock_fd = -1;
+		cache_log("[cgit] Lock (%ldms): Unable to open/create lock slot %s (%s): %s (%d)\n",
+			  cgit_ts_ms_sub_current(tStart), slot->lock_name,
+			  slot->key, strerror(saved_errno), saved_errno);
 		return saved_errno;
 	}
-	if (ftruncate(slot->lock_fd, 0) < 0)
-		return errno;
-	if (xwrite(slot->lock_fd, slot->key, slot->keylen + 1) < 0)
-		return errno;
+	while (fcntl(slot->lock_fd, F_SETLK, &lock) < 0) {
+		int saved_errno = errno;
+		long tDiff = cgit_ts_ms_sub_current(tStart);
+		if (EAGAIN != saved_errno ||
+		    tDiff >= ctx.cfg.cache_lock_timeout) {
+			close_lock(slot);
+			cache_log("[cgit] Lock (%ldms): Unable to lock slot %s (%s): %s (%d)\n",
+				  tDiff, slot->lock_name,
+				  slot->key, strerror(saved_errno), saved_errno);
+			return saved_errno;
+		}
+		++wait_count;
+		usleep(100000); // 100ms sleep instead of sched_yield()
+	}
+
+	if (wait_count && ctx.cfg.log_level >= LOG_LVL_DBG) {
+		cache_log("[cgit] Lock: Waited %ldms (%zu tries, cache_fd %d) to lock slot %s (%s)\n",
+			  cgit_ts_ms_sub_current(tStart), wait_count, slot->cache_fd,
+              slot->lock_name, slot->key);
+	}
+	if (slot->cache_fd <= 0) {
+		int err = open_slot(slot);
+		if (!err && slot->match) {
+			if(!is_expired(slot)) {
+				// concurrent process wrote the file
+				if (ctx.cfg.log_level >= LOG_LVL_WARN) {
+					cache_log("[cgit] Lock: Concurrent produced slot %s (%s)\n",
+						  slot->lock_name, slot->key);
+				}
+				unlock_slot(slot, UNLINK_LOCK_FILE);
+				close_lock(slot);
+				return 0;
+			}
+			// overwrite expired file ...
+			if (ctx.cfg.log_level >= LOG_LVL_WARN) {
+				cache_log("[cgit] Lock: Dropping expired slot %s (%s)\n",
+					  slot->lock_name, slot->key);
+			}
+		}
+		close_slot(slot);
+	}
+	if (ftruncate(slot->lock_fd, 0) < 0) {
+		int saved_errno = errno;
+		cache_log("[cgit] Lock (%ldms): Unable to truncate locked slot %s (%s): %s (%d)\n",
+			  cgit_ts_ms_sub_current(tStart), slot->lock_name,
+			  slot->key, strerror(saved_errno), saved_errno);
+		unlock_slot(slot, UNLINK_LOCK_FILE);
+		close_lock(slot);
+		return saved_errno;
+	}
+	if (xwrite(slot->lock_fd, slot->key, slot->keylen + 1) < 0) {
+		int saved_errno = errno;
+		cache_log("[cgit] Lock (%ldms): Unable to write to locked slot %s (%s): %s (%d)\n",
+			  cgit_ts_ms_sub_current(tStart), slot->lock_name,
+			  slot->key, strerror(saved_errno), saved_errno);
+		unlock_slot(slot, UNLINK_LOCK_FILE);
+		close_lock(slot);
+		return saved_errno;
+	}
+	if (ctx.cfg.log_level >= LOG_LVL_DBG) {
+		cache_log("[cgit] Lock (%ldms): Successful locked slot %s (%s)\n",
+			  cgit_ts_ms_sub_current(tStart), slot->lock_name, slot->key);
+	}
 	return 0;
 }
 
 /* Release the current lockfile. If `replace_old_slot` is set the
  * lockfile replaces the old cache slot, otherwise the lockfile is
  * just deleted.
+ * @param lock_file_op UNLINK_LOCK_FILE unlink or UNLINK_LOCK_FILE replace old-slot w/ lock-file
  */
-static int unlock_slot(struct cache_slot *slot, int replace_old_slot)
+static int unlock_slot(struct cache_slot *slot, enum lock_file_op_t lock_file_op)
 {
-	int err;
+	struct flock lock = {
+	    .l_type = F_UNLCK,
+	    .l_whence = SEEK_SET,
+	    .l_start = 0,
+	    .l_len = 0,
+	};
+	int err = 0;
 
-	if (replace_old_slot)
-		err = rename(slot->lock_name, slot->cache_name);
-	else
-		err = unlink(slot->lock_name);
-
+	if (REPLACE_OLD_SLOT == lock_file_op) {
+		if (rename(slot->lock_name, slot->cache_name)) {
+			err = errno;
+		}
+	} else if (UNLINK_LOCK_FILE == lock_file_op) {
+		if (unlink(slot->lock_name)) {
+			err = errno;
+		}
+	}
+	if (ctx.cfg.log_level < LOG_LVL_DBG && ENOENT == err) {
+		err = 0; // suppress ENOENT messages
+	}
+	if (err) {
+		cache_log("[cgit] Unlock: Failed to %s slot lock %s, cache %s, key %s: %s (%d)\n",
+			  to_string(lock_file_op),
+			  slot->lock_name, slot->cache_name, slot->key, strerror(err), err);
+	}
+	if (ENOENT == err) { // not an error
+		err = 0;
+	}
 	/* Restore stdout and close the temporary FD. */
 	if (slot->stdout_fd >= 0) {
 		dup2(slot->stdout_fd, STDOUT_FILENO);
 		close(slot->stdout_fd);
 		slot->stdout_fd = -1;
 	}
-
-	if (err)
-		return errno;
-
-	return 0;
+	if (slot->lock_fd > 0) {
+		if (fcntl(slot->lock_fd, F_SETLK, &lock) < 0) {
+			int saved_errno = errno;
+			close(slot->lock_fd);
+			slot->lock_fd = -1;
+			cache_log("[cgit] Unlock: Unable to unlock slot %s (%s): %s (%d)\n",
+			    slot->lock_name, slot->key, strerror(saved_errno), saved_errno);
+			if (!err)
+				err = saved_errno;
+		}
+	}
+	if (!err) {
+		if (ctx.cfg.log_level >= LOG_LVL_DBG) {
+			cache_log("[cgit] Unlock: Successful unlocked slot %s (%s)\n",
+				  slot->lock_name, slot->key);
+		}
+	}
+	return err;
 }
 
 /* Generate the content for the current cache slot by redirecting
@@ -402,84 +501,78 @@ unsigned long hash_str(const char *str)
 static int process_slot(struct cache_slot *slot)
 {
 	int err;
+	struct timespec tStart;
 
 	err = open_slot(slot);
-	if (!err && slot->match) {
-		if (is_expired(slot)) {
-			if (!lock_slot(slot)) {
-				/* If the cachefile has been replaced between
-				 * `open_slot` and `lock_slot`, we'll just
-				 * serve the stale content from the original
-				 * cachefile. This way we avoid pruning the
-				 * newly generated slot. The same code-path
-				 * is chosen if fill_slot() fails for some
-				 * reason.
-				 *
-				 * TODO? check if the new slot contains the
-				 * same key as the old one, since we would
-				 * prefer to serve the newest content.
-				 * This will require us to open yet another
-				 * file-descriptor and read and compare the
-				 * key from the new file, so for now we're
-				 * lazy and just ignore the new file.
-				 */
-				if (is_modified(slot) || fill_slot(slot)) {
-					unlock_slot(slot, 0);
-					close_lock(slot);
-				} else {
-					close_slot(slot);
-					unlock_slot(slot, 1);
-					slot->cache_fd = slot->lock_fd;
-				}
-			}
-		}
-		if ((err = print_slot(slot)) != 0) {
-			cache_log("[cgit] error printing cache %s: %s (%d)\n",
-				  slot->cache_name,
-				  strerror(err),
-				  err);
+	if (!err && slot->match && !is_expired(slot)) {
+		if ((err = print_slot(slot)) != 0 && err != ETIMEDOUT) {
+			cache_log("[cgit] error printing cache %s (%s): %s (%d)\n",
+				  slot->cache_name, slot->key, strerror(err), err);
 		}
 		close_slot(slot);
 		return err;
 	}
+	close_slot(slot);
 
 	/* If the cache slot does not exist (or its key doesn't match the
 	 * current key), lets try to create a new cache slot for this
 	 * request. If this fails (for whatever reason), lets just generate
 	 * the content without caching it and fool the caller to believe
 	 * everything worked out (but print a warning on stdout).
+	 *
+	 * If the cachefile has been created between
+	 * above `open_slot` and within `lock_slot`, we'll just
+	 * serve the new content from the new cachefile.
 	 */
-
-	close_slot(slot);
-	if ((err = lock_slot(slot)) != 0) {
-		cache_log("[cgit] Unable to lock slot %s: %s (%d)\n",
-			  slot->lock_name, strerror(err), err);
-		slot->fn();
+	cgit_ts_current(&tStart);
+	if ((err = lock_slot(slot, &tStart)) != 0) {
+		if (ctx.cfg.cache_lock_fail != 200) {
+			cgit_print_error_page(ctx.cfg.cache_lock_fail,
+			    "Cache: Could not lock new-slot within %ldms.",
+			    cgit_ts_ms_sub_current(&tStart));
+		} else {
+			cgit_ts_current(&tStart);
+			slot->fn();
+			cache_log("[cgit] Uncached fill took %ldms %s (failed lock %s)\n",
+				  cgit_ts_ms_sub_current(&tStart), slot->key, slot->lock_name);
+		}
 		return 0;
 	}
-
-	if ((err = fill_slot(slot)) != 0) {
-		cache_log("[cgit] Unable to fill slot %s: %s (%d)\n",
-			  slot->lock_name, strerror(err), err);
-		unlock_slot(slot, 0);
-		close_lock(slot);
-		slot->fn();
-		return 0;
-	}
-	// We've got a valid cache slot in the lock file, which
-	// is about to replace the old cache slot. But if we
-	// release the lockfile and then try to open the new cache
-	// slot, we might get a race condition with a concurrent
-	// writer for the same cache slot (with a different key).
-	// Lets avoid such a race by just printing the content of
-	// the lock file.
-	slot->cache_fd = slot->lock_fd;
-	unlock_slot(slot, 1);
-	if ((err = print_slot(slot)) != 0) {
-		cache_log("[cgit] error printing cache %s: %s (%d)\n",
-			  slot->cache_name,
-			  strerror(err),
-			  err);
+	if (slot->cache_fd <= 0) {
+		// first concurrent process lock
+		cgit_ts_current(&tStart);
+		if ((err = fill_slot(slot)) != 0) {
+			struct timespec tNow1;
+			long td = cgit_ts_ms_sub(cgit_ts_current(&tNow1), &tStart);
+			cache_log("[cgit] Unable to fill slot in %ldms %s (%s): %d: %s (%d)\n",
+			    td, slot->lock_name, slot->key,
+				ctx.cfg.cache_lock_fail, strerror(err), err);
+			unlock_slot(slot, UNLINK_LOCK_FILE);
+			close_lock(slot);
+			if (ctx.cfg.cache_lock_fail != 200) {
+				cgit_print_error_page(ctx.cfg.cache_lock_fail,
+				    "Cache: Could not fill slot within %ldms.", td);
+			} else {
+				slot->fn();
+				cache_log("[cgit] Uncached fill took %ldms %s (failed locked fill %s)\n",
+					cgit_ts_ms_sub_current(&tNow1), slot->key, slot->lock_name);
+			}
+			return 0;
+		}
+		// We've got a valid cache slot in the lock file, which
+		// is about to replace the old cache slot. But if we
+		// release the lockfile and then try to open the new cache
+		// slot, we might get a race condition with a concurrent
+		// writer for the same cache slot (with a different key).
+		// Lets avoid such a race by just printing the content of
+		// the lock file.
+		slot->cache_fd = slot->lock_fd;
+		unlock_slot(slot, REPLACE_OLD_SLOT);
+	} // else concurrent process produced slot (opened)
+	if ((err = print_slot(slot)) != 0 && err != ETIMEDOUT) {
+		cache_log("[cgit] error printing cache %s (%s): %s (%d)\n",
+			  slot->cache_name, slot->key,
+			  strerror(err), err);
 	}
 	close_slot(slot);
 	return err;
@@ -598,9 +691,22 @@ int cache_ls(const char *path)
 /* Print a message to stdout */
 void cache_log(const char *format, ...)
 {
+	char buffer[400];
+	char *end = buffer + sizeof(buffer);
+	char *out = buffer;
+	*(end - 1) = 0;
+	struct tm tNowLocal;
+	time_t tNow = time(NULL);
+	struct tm *tres = localtime_r(&tNow, &tNowLocal);
+	if (tres == &tNowLocal) {
+		// 'YYYY-mm-dd hh:mm:ss '
+		out += strftime(out, 20 + 1, "%Y-%m-%d %H:%M:%S ", tres);
+	}
+	pid_t pid = getpid();
+	out += snprintf(out, end - out, "%7d ", pid); // '  38588'
 	va_list args;
 	va_start(args, format);
-	vfprintf(stderr, format, args);
+	vsnprintf(out, end - out, format, args);
 	va_end(args);
+	fputs(buffer, stderr);
 }
-

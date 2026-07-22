@@ -737,6 +737,8 @@ void cgit_print_http_headers(void)
 		htmlf("Content-Type: %s\n", ctx.page.mimetype);
 	if (ctx.page.size)
 		htmlf("Content-Length: %zd\n", ctx.page.size);
+	if (ctx.page.retry_after>0)
+		htmlf("Retry-After: %d\n", ctx.page.retry_after);
 	if (ctx.page.filename) {
 		html("Content-Disposition: inline; filename=\"");
 		html_header_arg_in_quotes(ctx.page.filename);
@@ -914,6 +916,11 @@ void cgit_vprint_error_page(int code, const char *fmt, va_list ap)
 	char title[40];
 	snprintf(title, sizeof(title), "%d - cgit error", code);
 	ctx.page.title = title;
+	if (code == 503 || code == 429) {
+		ctx.page.retry_after = ctx.cfg.cache_lock_retry;
+	} else {
+		ctx.page.retry_after = 0;
+	}
 	ctx.page.expires = ctx.cfg.cache_dynamic_ttl;
 	ctx.page.status = code;
 	ctx.page.statusmsg = cgit_get_http_statusmsg(code);
@@ -929,6 +936,11 @@ void cgit_print_error_page0(int code)
 	const char * msg = cgit_get_http_statusmsg(code);
 	snprintf(title, sizeof(title), "%d - cgit error", code);
 	ctx.page.title = title;
+	if (code == 503 || code == 429) {
+		ctx.page.retry_after = ctx.cfg.cache_lock_retry;
+	} else {
+		ctx.page.retry_after = 0;
+	}
 	ctx.page.expires = ctx.cfg.cache_dynamic_ttl;
 	ctx.page.status = code;
 	ctx.page.statusmsg = msg;
