@@ -17,6 +17,7 @@
 #include "cache.h"
 #include "html.h"
 #include "ui-shared.h"
+#include <limits.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <time.h>
@@ -359,6 +360,9 @@ static int lock_slot(struct cache_slot *slot, const struct timespec *tStart)
 				cache_log("[cgit] Lock: Dropping expired slot %s (%s)\n",
 					  slot->lock_name, slot->key);
 			}
+		} else if (!err && ctx.cfg.log_level >= LOG_LVL_WARN+1) {
+			cache_log("[cgit] Lock: Dropping hash colliding slot %s (%s)\n",
+				  slot->lock_name, slot->key);
 		}
 		close_slot(slot);
 	}
@@ -476,26 +480,61 @@ static int fill_slot(struct cache_slot *slot)
 	return 0;
 }
 
-/* Crude implementation of 32-bit FNV-1 hash algorithm,
- * see http://www.isthe.com/chongo/tech/comp/fnv/ for details
- * about the magic numbers.
+/** Replacing (unsigned int)floor(log2(v)) the obvious way w/o math-lib */
+static unsigned int int_log2(size_t v) {
+	int r = 0; // result of log2(v) will go here
+	while ( v >>= 1 ) {
+		++r;
+	}
+	return r;
+}
+
+#define FNV_OFFSET_64 14695981039346656037UL
+#define FNV_PRIME_64  1099511628211UL
+
+/**
+ * Crude implementation of 64-bit FNV-1a hash algorithm,
+ * see http://www.isthe.com/chongo/tech/comp/fnv/,
+ * and http://www.isthe.com/chongo/tech/comp/fnv/#FNV-1a
+ * and https://www.rfc-editor.org/info/rfc9923/ for details.
+ *
+ * @param d data pointer
+ * @param len length of data
+ * @param h hash from previous round, use FNV_OFFSET_64 for initial round
  */
-#define FNV_OFFSET 0x811c9dc5
-#define FNV_PRIME  0x01000193
-
-unsigned long hash_str(const char *str)
+uint64_t hash64_str2(const void *d, size_t len, uint64_t h)
 {
-	unsigned long h = FNV_OFFSET;
-	unsigned char *s = (unsigned char *)str;
+	const unsigned char *s = (const unsigned char*)d;
+	const unsigned char * const e = s + len;
 
-	if (!s)
-		return h;
-
-	while (*s) {
-		h *= FNV_PRIME;
-		h ^= *s++;
+	while (s < e) {
+		h ^= (uint64_t)*s++;
+		// h *= FNV_PRIME_64;
+		h += (h<<1) + (h<<4) + (h<<5) + (h<<7) + (h<<8) + (h<<40);
 	}
 	return h;
+}
+
+/** Initial round of hash64_str2 */
+uint64_t hash64_str(const void *d, size_t len)
+{
+	return hash64_str2(d, len, FNV_OFFSET_64);
+}
+
+/**
+ * Clipping 64-bit hash64_str value to max value_count,
+ * by shift-XOR and masking.
+ */
+uint64_t hash64_str_clipped(const void *d, size_t len, size_t value_count) {
+	if(0==value_count || 0==len) {
+		return 0;
+	}
+	unsigned int b = int_log2(value_count)+1;
+	if(64 <= b) {
+		return hash64_str2(d, len, FNV_OFFSET_64);
+	}
+	uint64_t h = hash64_str2(d, len, FNV_OFFSET_64);
+	return ((h>>b) ^ h) & (((uint64_t)1<<b)-1);
 }
 
 static int process_slot(struct cache_slot *slot)
@@ -505,6 +544,10 @@ static int process_slot(struct cache_slot *slot)
 
 	err = open_slot(slot);
 	if (!err && slot->match && !is_expired(slot)) {
+		if (!err && ctx.cfg.log_level >= LOG_LVL_WARN+1) {
+			cache_log("[cgit] Using hash matching slot %s (%s)\n",
+				  slot->lock_name, slot->key);
+		}
 		if ((err = print_slot(slot)) != 0 && err != ETIMEDOUT) {
 			cache_log("[cgit] error printing cache %s (%s): %s (%d)\n",
 				  slot->cache_name, slot->key, strerror(err), err);
@@ -579,10 +622,10 @@ static int process_slot(struct cache_slot *slot)
 }
 
 /* Print cached content to stdout, generate the content if necessary. */
-int cache_process(int size, const char *path, const char *key, int ttl,
+int cache_process(size_t size, const char *path, const char *key, int ttl,
 		  cache_fill_fn fn)
 {
-	unsigned long hash;
+	uint64_t hash;
 	int i;
 	struct strbuf filename = STRBUF_INIT;
 	struct strbuf lockname = STRBUF_INIT;
@@ -601,14 +644,28 @@ int cache_process(int size, const char *path, const char *key, int ttl,
 		fn();
 		return 0;
 	}
-	if (!key)
+	size_t keylen;
+	if (!key) {
 		key = "";
-	hash = hash_str(key) % size;
+		keylen = 0;
+	} else {
+		keylen = strlen(key);
+	}
+	hash = hash64_str_clipped(key, keylen, size);
 	strbuf_addstr(&filename, path);
 	strbuf_ensure_end(&filename, '/');
-	for (i = 0; i < 8; i++) {
-		strbuf_addf(&filename, "%x", (unsigned char)(hash & 0xf));
-		hash >>= 4;
+	if (size <= 0xffffffffU) {
+		// 32-bit (8-hex-digits, 4 bytes)
+		for (i = 0; i < 8; i++) {
+			strbuf_addf(&filename, "%1x", (unsigned char)(hash & 0xf));
+			hash >>= 4; // 1 hex-digits
+		}
+	} else {
+		// 64-bit (16-hex-digits, 8 bytes)
+		for (i = 0; i < 8; i++) {
+			strbuf_addf(&filename, "%02x", (unsigned char)(hash & 0xff));
+			hash >>= 8; // 2 hex-digits
+		}
 	}
 	strbuf_addbuf(&lockname, &filename);
 	strbuf_addstr(&lockname, ".lock");
@@ -618,7 +675,7 @@ int cache_process(int size, const char *path, const char *key, int ttl,
 	slot.cache_name = filename.buf;
 	slot.lock_name = lockname.buf;
 	slot.key = key;
-	slot.keylen = strlen(key);
+	slot.keylen = keylen;
 	result = process_slot(&slot);
 
 	strbuf_release(&filename);

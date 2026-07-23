@@ -206,7 +206,7 @@ static void config_cb(const char *name, const char *value)
 	else if (!strcmp(name, "max-stats"))
 		ctx.cfg.max_stats = cgit_find_stats_period(value, NULL);
 	else if (!strcmp(name, "cache-size"))
-		ctx.cfg.cache_size = atoi(value);
+		ctx.cfg.cache_size = (size_t)atol(value);
 	else if (!strcmp(name, "cache-root"))
 		ctx.cfg.cache_root = strdup_first_line(expand_macros(value));
 	else if (!strcmp(name, "cache-root-ttl"))
@@ -941,12 +941,12 @@ static void process_cached_repolist(const char *path)
 	struct stat st;
 	struct strbuf cached_rc = STRBUF_INIT;
 	time_t age;
-	unsigned long hash;
+	uint64_t hash;
 
-	hash = hash_str(path);
+	hash = hash64_str(path, strlen(path));
 	if (ctx.cfg.project_list)
-		hash += hash_str(ctx.cfg.project_list);
-	strbuf_addf(&cached_rc, "%s/rc-%8lx", ctx.cfg.cache_root, hash);
+		hash = hash64_str2(ctx.cfg.project_list, strlen(ctx.cfg.project_list), hash);
+	strbuf_addf(&cached_rc, "%s/rc-%16lx", ctx.cfg.cache_root, hash);
 
 	if (stat(cached_rc.buf, &st)) {
 		/* Nothing is cached, we need to scan without forking. And
@@ -1131,7 +1131,6 @@ int cmd_main(int argc, const char **argv)
 	 * if the supplied cookie is valid. All cookies are valid if there is no
 	 * auth_filter. If there is an auth_filter, the filter decides. */
 	authenticate_cookie();
-
 	ttl = calc_ttl();
 	if (ttl < 0)
 		ctx.page.expires += 10 * 365 * 24 * 60 * 60; /* 10 years */

@@ -224,7 +224,7 @@ struct cgit_config {
 	char *repository_sort;
 	char *virtual_root;	/* Always ends with '/'. */
 	char *strict_export;
-	int cache_size;
+	size_t cache_size;
 	int cache_dynamic_ttl;
 	int cache_max_create_time;
 	int cache_repo_ttl;
