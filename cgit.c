@@ -206,7 +206,7 @@ static void config_cb(const char *name, const char *value)
 	else if (!strcmp(name, "max-stats"))
 		ctx.cfg.max_stats = cgit_find_stats_period(value, NULL);
 	else if (!strcmp(name, "cache-size"))
-		ctx.cfg.cache_size = (size_t)atol(value);
+		ctx.cfg.cache_size = (size_t)strtoul(value, NULL, 10);
 	else if (!strcmp(name, "cache-root"))
 		ctx.cfg.cache_root = strdup_first_line(expand_macros(value));
 	else if (!strcmp(name, "cache-root-ttl"))

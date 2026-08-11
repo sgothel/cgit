@@ -22,6 +22,7 @@
 #include <fcntl.h>
 #include <time.h>
 #include <unistd.h>
+#include <stdint.h>
 #ifdef HAVE_LINUX_SENDFILE
 #include <sys/sendfile.h>
 #endif
@@ -529,7 +530,7 @@ uint64_t hash64_str_clipped(const void *d, size_t len, size_t value_count) {
 	if(0==value_count || 0==len) {
 		return 0;
 	}
-	unsigned int b = int_log2(value_count)+1;
+	unsigned int b = UINT64_MAX == value_count ? 64 : int_log2(value_count)+1;
 	if(64 <= b) {
 		return hash64_str2(d, len, FNV_OFFSET_64);
 	}
