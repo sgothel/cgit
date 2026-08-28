@@ -125,6 +125,8 @@ void cgit_repo_config(struct cgit_repo *repo, const char *name, const char *valu
 	}
 }
 
+#define MY_MAX(x, y) (((x) > (y)) ? (x) : (y))
+
 static void config_cb(const char *name, const char *value)
 {
 	const char *arg;
@@ -222,11 +224,13 @@ static void config_cb(const char *name, const char *value)
 	else if (!strcmp(name, "cache-lock-retry"))
 		ctx.cfg.cache_lock_retry = atoi(value);
 	else if (!strcmp(name, "cache-lock-timeout"))
-		ctx.cfg.cache_lock_timeout = atoi(value); // ms
+		ctx.cfg.cache_lock_timeout = MY_MAX(1000, atoi(value)); // ms
 	else if (!strcmp(name, "client-io-idle-timeout"))
-		ctx.cfg.client_io_idle_timeout = atoi(value)*1000; // s -> ms
+		ctx.cfg.client_io_idle_timeout = MY_MAX(1, atoi(value))*1000; // s -> ms
 	else if (!strcmp(name, "client-io-min-rate"))
 		ctx.cfg.client_io_min_rate = atoi(value);
+	else if (!strcmp(name, "timeout"))
+		ctx.cfg.timeout = atoi(value);
 	else if (!strcmp(name, "cache-dynamic-ttl"))
 		ctx.cfg.cache_dynamic_ttl = atoi(value);
 	else if (!strcmp(name, "cache-about-ttl"))
@@ -399,6 +403,7 @@ static void prepare_context(void)
 	ctx.cfg.cache_lock_timeout = 1000;
 	ctx.cfg.client_io_idle_timeout = 20000;
 	ctx.cfg.client_io_min_rate = 500;
+	ctx.cfg.timeout = 0;
 	ctx.cfg.case_sensitive_sort = 1;
 	ctx.cfg.branch_sort = 0;
 	ctx.cfg.commit_sort = 0;
@@ -445,6 +450,7 @@ static void prepare_context(void)
 	ctx.env.http_cookie = getenv("HTTP_COOKIE");
 	ctx.env.http_referer = getenv("HTTP_REFERER");
 	ctx.env.remote_addr = getenv("REMOTE_ADDR");
+	ctx.env.remote_port = getenv("REMOTE_PORT") ? atoi(getenv("REMOTE_PORT")) : 0;
 	ctx.env.content_length = getenv("CONTENT_LENGTH") ? strtoul(getenv("CONTENT_LENGTH"), NULL, 10) : 0;
 	ctx.env.authenticated = 0;
 	ctx.page.mimetype = "text/html";
@@ -897,6 +903,7 @@ static void print_config(FILE *f, const char *prefix)
 	fprintf(f, "%scache-lock-timeout=%d\n", prefix, ctx.cfg.cache_lock_timeout);
 	fprintf(f, "%sclient-io-idle-timeout=%d\n", prefix, ctx.cfg.client_io_idle_timeout);
 	fprintf(f, "%sclient-io-min-rate=%d\n", prefix, ctx.cfg.client_io_min_rate);
+	fprintf(f, "%stimeout=%d\n", prefix, ctx.cfg.timeout);
 }
 
 /* Scan 'path' for git repositories, save the resulting repolist in 'cached_rc'
@@ -1080,6 +1087,28 @@ static NORETURN void cgit_die_routine(const char *msg, va_list params)
 	exit(0);
 }
 
+typedef void (*sighandler_t)(int);
+
+static sighandler_t cgit_sh_alrm_orig;
+static const char *cgit_query;
+static struct timespec cgit_start;
+
+static void cgit_sighandler(int sig)
+{
+	static struct timespec now;
+	cgit_ts_current(&now);
+	const long dt = cgit_ts_ms_sub(&now, &cgit_start);
+	switch (sig)
+	{
+		case SIGALRM:
+			cgit_log("SIGALRM after %ldms, query %s\n", dt, cgit_query);
+			cgit_sh_alrm_orig(sig);
+			break;
+		default:
+			cgit_log("SIGNAL (%d) after %ldms, query %s\n", sig, dt, ctx.qry.name);
+	}
+}
+
 int cmd_main(int argc, const char **argv)
 {
 	const char *path;
@@ -1138,6 +1167,19 @@ int cmd_main(int argc, const char **argv)
 		ctx.page.expires += ttl * 60;
 	if (!ctx.env.authenticated || (ctx.env.request_method && !strcmp(ctx.env.request_method, "HEAD")))
 		ctx.cfg.cache_size = 0;
+
+	/* Essential for cgit instances w/o receiving signals from httpd, e.g. Apache2 + suEXEC. */
+	if (ctx.cfg.timeout > 0)
+	{
+		cgit_query = ctx.qry.raw;
+		cgit_ts_current(&cgit_start);
+		if (SIG_ERR == (cgit_sh_alrm_orig = signal(SIGALRM, cgit_sighandler))) {
+			cgit_log("Unable to install SIGALRM handler\n");
+			exit(-1);
+		}
+		alarm(ctx.cfg.timeout);
+	}
+
 	err = cache_process(ctx.cfg.cache_size, ctx.cfg.cache_root,
 			    ctx.qry.raw, ttl, process_request);
 	cgit_cleanup_filters();

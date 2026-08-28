@@ -243,6 +243,13 @@ struct cgit_config {
 	int client_io_idle_timeout;
 	/* minimum transfer rate in Bps for sending/receiving a full cached body to/from the client. Defaults to 500 Bps. */
 	int client_io_min_rate;
+	/*
+	 * Global timeout in seconds for this cgit instance to receive SIGALRM, ignored if zero.
+	 * Essential if httpd doesn't forward signals, e.g. `Apache2` + `suEXEC`.
+    	 * Use approximate 1-2s before `Apache2` `Timeout` core-config to hold bots back, e.g. `Apache Timeout=10, cgit timeout=8`.
+    	 * Defaults to 0s.
+	 */
+	int timeout;
 	int case_sensitive_sort;
 	int embedded;
 	int enable_filter_overrides;
@@ -320,6 +327,7 @@ struct cgit_environment {
 	const char *http_cookie;
 	const char *http_referer;
 	const char *remote_addr;
+	int remote_port;
 	unsigned int content_length;
 	int authenticated;
 };

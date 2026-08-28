@@ -470,6 +470,13 @@ strict-export::
 	repositories to match those exported by git-daemon. This option must
 	be defined prior to scan-path.
 
+timeout::
+	Global timeout in seconds for each cgit instance to receive SIGALRM, ignored if zero.
+	Essential if httpd doesn't forward signals, e.g. `Apache2` + `suEXEC`.
+	Use approximate 1-2s before `Apache2` `Timeout` core-config to hold bots back,
+	e.g. `Apache Timeout=10, cgit timeout=8`.
+	Defaults to value: "0" (0s).
+
 virtual-root::
 	Url which, if specified, will be used as root for all cgit links. It
 	will also cause cgit to generate 'virtual urls', i.e. urls like
