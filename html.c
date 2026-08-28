@@ -78,10 +78,60 @@ char *fmtalloc(const char *format, ...)
 	return strbuf_detach(&sb, NULL);
 }
 
+#define MY_MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
+
+static void sendhtml_to_idle(const struct timespec *tStart,
+			    const struct timespec *tLastSend,
+			    const struct timespec *tNow,
+			    size_t off, size_t size)
+{
+	const long td_total = cgit_ts_ms_sub(tNow, tStart);
+	const long td_idle = cgit_ts_ms_sub(tNow, tLastSend);
+	const long rate = off / MY_MAX(1, td_total/1000);
+	cgit_log("send_html timeout idle %ldms: sending data "
+			  "%ld/%ld bytes "
+			  "within [total %ldms, idle %ldms, rate %ld Bps]\n",
+			  td_idle, off, size, td_total, td_idle, rate);
+}
+
+static void sendhtml_to_minrate(const struct timespec *tStart,
+			       const struct timespec *tNow,
+			       size_t off, size_t size)
+{
+	const long td_total = cgit_ts_ms_sub(tNow, tStart);
+	const long rate = off / MY_MAX(1, td_total/1000);
+	cgit_log("send_html timeout rate-limit %d Bps: sending "
+			  "%ld/%ld bytes "
+			  "within [total %ldms, rate %ld Bps]\n",
+			  ctx.cfg.client_io_min_rate,
+			  off, size, td_total, rate);
+}
+
 void html_raw(const char *data, size_t size)
 {
-	if (write(STDOUT_FILENO, data, size) != size)
-		die_errno("write error on html output");
+	struct timespec tStart;
+	cgit_ts_current(&tStart);
+	struct timespec tLastSend = tStart;
+	struct timespec tNow = tStart;
+
+	const long to_min_rate =
+		MY_MAX(ctx.cfg.client_io_idle_timeout, (size / (long)ctx.cfg.client_io_min_rate) * 1000L);
+
+	off_t total_out = 0;
+	ssize_t res;
+	if ((res = cgit_write_to(STDOUT_FILENO, data, size, &total_out,
+				 &tStart, &tLastSend, to_min_rate)) < 0)
+	{
+		if (ETIMEDOUT == errno) {
+			cgit_ts_current(&tNow);
+			if (-2 == res) {
+				sendhtml_to_idle(&tStart, &tLastSend, &tNow, total_out, size);
+			} else if (-3 == res) {
+				sendhtml_to_minrate(&tStart, &tNow, total_out, size);
+			}
+			exit(-1);
+		}
+	}
 }
 
 void html(const char *txt)
