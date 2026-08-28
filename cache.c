@@ -243,6 +243,52 @@ static const char *to_string(enum lock_file_op_t lock_file_op) {
 	}
 }
 
+static int set_non_block(int fd, struct cache_slot *slot) {
+	int flags = fcntl(fd, F_GETFL);
+	if (flags == -1)
+	{
+		int saved_errno = errno;
+		cgit_log("Unable to get status flags for fd %d, slot %s (%s): %s (%d)",
+			fd, slot->lock_name, slot->key, strerror(saved_errno), saved_errno);
+		return saved_errno;
+	}
+	if (!(flags & O_NONBLOCK))
+	{
+		flags |= O_NONBLOCK;
+		if (fcntl(fd, F_SETFL, flags) == -1)
+		{
+			int saved_errno = errno;
+			cgit_log("Unable to set non-block flags for fd %d, slot %s (%s): %s (%d)",
+				fd, slot->lock_name, slot->key, strerror(saved_errno), saved_errno);
+			return saved_errno;
+		}
+	}
+	return 0;
+}
+
+static int set_close_on_exec(int fd, struct cache_slot *slot) {
+	int flags = fcntl(fd, F_GETFD);
+	if (flags == -1)
+	{
+		int saved_errno = errno;
+		cgit_log("Unable to get descriptor flags for fd %d, slot %s (%s): %s (%d)",
+			fd, slot->lock_name, slot->key, strerror(saved_errno), saved_errno);
+		return saved_errno;
+	}
+	if (!(flags & FD_CLOEXEC))
+	{
+		flags |= FD_CLOEXEC;
+		if (fcntl(fd, F_SETFD, flags) == -1)
+		{
+			int saved_errno = errno;
+			cgit_log("Unable to set close-on-exit flags for fd %d, slot %s (%s): %s (%d)",
+				fd, slot->lock_name, slot->key, strerror(saved_errno), saved_errno);
+			return saved_errno;
+		}
+	}
+	return 0;
+}
+
 /* Create a lockfile used to store the generated content for a cache
  * slot, and write the slot key + \0 into it.
  * Returns 0 on success and errno otherwise.
@@ -270,6 +316,13 @@ static int lock_slot(struct cache_slot *slot, const struct timespec *tStart)
 			  cgit_ts_ms_sub_current(tStart), slot->lock_name,
 			  slot->key, strerror(saved_errno), saved_errno);
 		return saved_errno;
+	}
+	int err;
+	if (0 != (err = set_close_on_exec(slot->lock_fd, slot))) {
+		return err;
+	}
+	if (0 != (err = set_non_block(slot->lock_fd, slot))) {
+		return err;
 	}
 	while (fcntl(slot->lock_fd, F_SETLK, &lock) < 0) {
 		int saved_errno = errno;
