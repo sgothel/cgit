@@ -88,7 +88,6 @@ static int close_slot(struct cache_slot *slot)
 	return err;
 }
 
-#define MY_MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 #define MY_MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
 
 static int sendslot_to_idle(const struct timespec *tStart,
@@ -99,11 +98,10 @@ static int sendslot_to_idle(const struct timespec *tStart,
 	const long td_total = cgit_ts_ms_sub(tNow, tStart);
 	const long td_idle = cgit_ts_ms_sub(tNow, tLastSend);
 	const long rate = off / MY_MAX(1, td_total/1000);
-	cache_log("[cgit] send_slot timeout idle %ldms: sending cache "
-			  "%s (%s) (%ld/%ld bytes) to client `%s` "
+	cgit_log("send_slot timeout idle %ldms: sending cache "
+			  "%s (%s) (%ld/%ld bytes) "
 			  "within [total %ldms, idle %ldms, rate %ld Bps]\n",
-			  td_idle, slot->cache_name, slot->key, off, size, ctx.env.remote_addr,
-			  td_total, td_idle, rate);
+			  td_idle, slot->cache_name, slot->key, off, size, td_total, td_idle, rate);
 	return ETIMEDOUT;
 }
 
@@ -113,12 +111,11 @@ static int sendslot_to_minrate(const struct timespec *tStart,
 {
 	const long td_total = cgit_ts_ms_sub(tNow, tStart);
 	const long rate = off / MY_MAX(1, td_total/1000);
-	cache_log("[cgit] send_slot timeout rate-limit %d Bps: sending "
-			  "cache %s (%s) (%ld/%ld bytes) to client `%s` "
+	cgit_log("send_slot timeout rate-limit %d Bps: sending "
+			  "cache %s (%s) (%ld/%ld bytes) "
 			  "within [total %ldms, rate %ld Bps]\n",
 			  ctx.cfg.client_io_min_rate, slot->cache_name, slot->key,
-			  off, size, ctx.env.remote_addr,
-			  td_total, rate);
+			  off, size, td_total, rate);
 	return ETIMEDOUT;
 }
 
@@ -129,10 +126,9 @@ static int sendslot_ok(const struct timespec *tStart,
 	if (ctx.cfg.log_level >= LOG_LVL_DBG) {
 		const long td_total = cgit_ts_ms_sub(tNow, tStart);
 		const long rate = size / MY_MAX(1, td_total/1000);
-		cache_log("[cgit] send_slot status: sent cache %s (%s) %ld bytes) to "
-			  "client `%s` within [total %ldms, rate %ld Bps]\n",
-			  slot->cache_name, slot->key,
-			  size, ctx.env.remote_addr, td_total, rate);
+		cgit_log("send_slot status: sent cache %s (%s) %ld bytes) "
+			  "within [total %ldms, rate %ld Bps]\n",
+			  slot->cache_name, slot->key, size, td_total, rate);
 	}
 	return 0;
 }
@@ -144,54 +140,6 @@ static int sendslot_ok2(const struct timespec *tStart, size_t size, struct cache
 		return sendslot_ok(tStart, cgit_ts_current(&tNow), size, slot);
 	}
 	return 0;
-}
-
-static ssize_t write_in_full_to(int fd, const void *buf, size_t count, off_t *total_out,
-				const struct timespec *tStart,
-				struct timespec *tLastSend, long to_max)
-{
-	if (!count) {
-		return 0;
-	}
-	const char *p = buf;
-	ssize_t total = 0;
-	struct timespec tNow = *tLastSend;
-
-	do {
-		if (cgit_ts_ms_sub(&tNow, tLastSend) >= (long)ctx.cfg.client_io_idle_timeout) {
-			errno = ETIMEDOUT;
-			return -2;
-		}
-		if (cgit_ts_ms_sub(&tNow, tStart) > to_max) {
-			errno = ETIMEDOUT;
-			return -3;
-		}
-
-		ssize_t written = write(fd, p, MY_MIN(count, MAX_IO_SIZE));
-		cgit_ts_current(&tNow);
-		if (written < 0) {
-			if (errno == EINTR)
-				continue;
-			if (errno == EAGAIN || errno == EWOULDBLOCK) {
-				struct pollfd pfd;
-				pfd.fd = fd;
-				pfd.events = POLLOUT;
-				// no need to check for errors,
-				// subsequent read/write will detect unrecoverable errors
-				poll(&pfd, 1, -1);
-				continue;
-			}
-			return -1;
-		} else if (written > 0) {
-			*total_out += written;
-			count -= written;
-			p += written;
-			total += written;
-			*tLastSend = tNow;
-			if (!count)
-				return total;
-		}
-	} while (1);
 }
 
 /* Print the content of the active cache slot (but skip the key). */
@@ -244,8 +192,8 @@ static int print_slot(struct cache_slot *slot)
 			return errno;
 
 		ssize_t res;
-		if ((res = write_in_full_to(STDOUT_FILENO, slot->buf, count, &off,
-					    &tStart, &tLastSend, to_min_rate)) < 0)
+		if ((res = cgit_write_to(STDOUT_FILENO, slot->buf, count, &off,
+					 &tStart, &tLastSend, to_min_rate)) < 0)
 		{
 			if (ETIMEDOUT == errno) {
 				cgit_ts_current(&tNow);
@@ -310,7 +258,7 @@ static int lock_slot(struct cache_slot *slot, const struct timespec *tStart)
 	size_t wait_count = 0;
 
 	if (0 == strncmp("cgit_test_key_no_lock", slot->key, 21)) {
-		cache_log("[cgit] Lock (%ldms): Test-Key: %s -> forced fail\n",
+		cgit_log("Lock (%ldms): Test-Key: %s -> forced fail\n",
 			  cgit_ts_ms_sub_current(tStart), slot->key);
 		return ENOENT;
 	}
@@ -318,7 +266,7 @@ static int lock_slot(struct cache_slot *slot, const struct timespec *tStart)
 	    open(slot->lock_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
 	if (slot->lock_fd == -1) {
 		int saved_errno = errno;
-		cache_log("[cgit] Lock (%ldms): Unable to open/create lock slot %s (%s): %s (%d)\n",
+		cgit_log("Lock (%ldms): Unable to open/create lock slot %s (%s): %s (%d)\n",
 			  cgit_ts_ms_sub_current(tStart), slot->lock_name,
 			  slot->key, strerror(saved_errno), saved_errno);
 		return saved_errno;
@@ -329,7 +277,7 @@ static int lock_slot(struct cache_slot *slot, const struct timespec *tStart)
 		if (EAGAIN != saved_errno ||
 		    tDiff >= ctx.cfg.cache_lock_timeout) {
 			close_lock(slot);
-			cache_log("[cgit] Lock (%ldms): Unable to lock slot %s (%s): %s (%d)\n",
+			cgit_log("Lock (%ldms): Unable to lock slot %s (%s): %s (%d)\n",
 				  tDiff, slot->lock_name,
 				  slot->key, strerror(saved_errno), saved_errno);
 			return saved_errno;
@@ -339,7 +287,7 @@ static int lock_slot(struct cache_slot *slot, const struct timespec *tStart)
 	}
 
 	if (wait_count && ctx.cfg.log_level >= LOG_LVL_DBG) {
-		cache_log("[cgit] Lock: Waited %ldms (%zu tries, cache_fd %d) to lock slot %s (%s)\n",
+		cgit_log("Lock: Waited %ldms (%zu tries, cache_fd %d) to lock slot %s (%s)\n",
 			  cgit_ts_ms_sub_current(tStart), wait_count, slot->cache_fd,
               slot->lock_name, slot->key);
 	}
@@ -349,8 +297,9 @@ static int lock_slot(struct cache_slot *slot, const struct timespec *tStart)
 			if(!is_expired(slot)) {
 				// concurrent process wrote the file
 				if (ctx.cfg.log_level >= LOG_LVL_WARN) {
-					cache_log("[cgit] Lock: Concurrent produced slot %s (%s)\n",
-						  slot->lock_name, slot->key);
+					long tDiff = cgit_ts_ms_sub_current(tStart);
+					cgit_log("Lock (%ldms): Concurrent produced slot %s (%s)\n",
+						  tDiff, slot->lock_name, slot->key);
 				}
 				unlock_slot(slot, UNLINK_LOCK_FILE);
 				close_lock(slot);
@@ -358,18 +307,18 @@ static int lock_slot(struct cache_slot *slot, const struct timespec *tStart)
 			}
 			// overwrite expired file ...
 			if (ctx.cfg.log_level >= LOG_LVL_WARN) {
-				cache_log("[cgit] Lock: Dropping expired slot %s (%s)\n",
+				cgit_log("Lock: Dropping expired slot %s (%s)\n",
 					  slot->lock_name, slot->key);
 			}
 		} else if (!err && ctx.cfg.log_level >= LOG_LVL_WARN+1) {
-			cache_log("[cgit] Lock: Dropping hash colliding slot %s (%s)\n",
+			cgit_log("Lock: Dropping hash colliding slot %s (%s)\n",
 				  slot->lock_name, slot->key);
 		}
 		close_slot(slot);
 	}
 	if (ftruncate(slot->lock_fd, 0) < 0) {
 		int saved_errno = errno;
-		cache_log("[cgit] Lock (%ldms): Unable to truncate locked slot %s (%s): %s (%d)\n",
+		cgit_log("Lock (%ldms): Unable to truncate locked slot %s (%s): %s (%d)\n",
 			  cgit_ts_ms_sub_current(tStart), slot->lock_name,
 			  slot->key, strerror(saved_errno), saved_errno);
 		unlock_slot(slot, UNLINK_LOCK_FILE);
@@ -378,7 +327,7 @@ static int lock_slot(struct cache_slot *slot, const struct timespec *tStart)
 	}
 	if (xwrite(slot->lock_fd, slot->key, slot->keylen + 1) < 0) {
 		int saved_errno = errno;
-		cache_log("[cgit] Lock (%ldms): Unable to write to locked slot %s (%s): %s (%d)\n",
+		cgit_log("Lock (%ldms): Unable to write to locked slot %s (%s): %s (%d)\n",
 			  cgit_ts_ms_sub_current(tStart), slot->lock_name,
 			  slot->key, strerror(saved_errno), saved_errno);
 		unlock_slot(slot, UNLINK_LOCK_FILE);
@@ -386,7 +335,7 @@ static int lock_slot(struct cache_slot *slot, const struct timespec *tStart)
 		return saved_errno;
 	}
 	if (ctx.cfg.log_level >= LOG_LVL_DBG) {
-		cache_log("[cgit] Lock (%ldms): Successful locked slot %s (%s)\n",
+		cgit_log("Lock (%ldms): Successful locked slot %s (%s)\n",
 			  cgit_ts_ms_sub_current(tStart), slot->lock_name, slot->key);
 	}
 	return 0;
@@ -420,7 +369,7 @@ static int unlock_slot(struct cache_slot *slot, enum lock_file_op_t lock_file_op
 		err = 0; // suppress ENOENT messages
 	}
 	if (err) {
-		cache_log("[cgit] Unlock: Failed to %s slot lock %s, cache %s, key %s: %s (%d)\n",
+		cgit_log("Unlock: Failed to %s slot lock %s, cache %s, key %s: %s (%d)\n",
 			  to_string(lock_file_op),
 			  slot->lock_name, slot->cache_name, slot->key, strerror(err), err);
 	}
@@ -438,7 +387,7 @@ static int unlock_slot(struct cache_slot *slot, enum lock_file_op_t lock_file_op
 			int saved_errno = errno;
 			close(slot->lock_fd);
 			slot->lock_fd = -1;
-			cache_log("[cgit] Unlock: Unable to unlock slot %s (%s): %s (%d)\n",
+			cgit_log("Unlock: Unable to unlock slot %s (%s): %s (%d)\n",
 			    slot->lock_name, slot->key, strerror(saved_errno), saved_errno);
 			if (!err)
 				err = saved_errno;
@@ -446,7 +395,7 @@ static int unlock_slot(struct cache_slot *slot, enum lock_file_op_t lock_file_op
 	}
 	if (!err) {
 		if (ctx.cfg.log_level >= LOG_LVL_DBG) {
-			cache_log("[cgit] Unlock: Successful unlocked slot %s (%s)\n",
+			cgit_log("Unlock: Successful unlocked slot %s (%s)\n",
 				  slot->lock_name, slot->key);
 		}
 	}
@@ -546,11 +495,11 @@ static int process_slot(struct cache_slot *slot)
 	err = open_slot(slot);
 	if (!err && slot->match && !is_expired(slot)) {
 		if (!err && ctx.cfg.log_level >= LOG_LVL_WARN+1) {
-			cache_log("[cgit] Using hash matching slot %s (%s)\n",
+			cgit_log("Using hash matching slot %s (%s)\n",
 				  slot->lock_name, slot->key);
 		}
 		if ((err = print_slot(slot)) != 0 && err != ETIMEDOUT) {
-			cache_log("[cgit] error printing cache %s (%s): %s (%d)\n",
+			cgit_log("error printing cache %s (%s): %s (%d)\n",
 				  slot->cache_name, slot->key, strerror(err), err);
 		}
 		close_slot(slot);
@@ -572,12 +521,12 @@ static int process_slot(struct cache_slot *slot)
 	if ((err = lock_slot(slot, &tStart)) != 0) {
 		if (ctx.cfg.cache_lock_fail != 200) {
 			cgit_print_error_page(ctx.cfg.cache_lock_fail,
-			    "Cache: Could not lock new-slot within %ldms.",
+			    "Cache: Unable to lock new-slot within %ldms.",
 			    cgit_ts_ms_sub_current(&tStart));
 		} else {
 			cgit_ts_current(&tStart);
 			slot->fn();
-			cache_log("[cgit] Uncached fill took %ldms %s (failed lock %s)\n",
+			cgit_log("Uncached fill took %ldms %s (failed lock %s)\n",
 				  cgit_ts_ms_sub_current(&tStart), slot->key, slot->lock_name);
 		}
 		return 0;
@@ -588,17 +537,17 @@ static int process_slot(struct cache_slot *slot)
 		if ((err = fill_slot(slot)) != 0) {
 			struct timespec tNow1;
 			long td = cgit_ts_ms_sub(cgit_ts_current(&tNow1), &tStart);
-			cache_log("[cgit] Unable to fill slot in %ldms %s (%s): %d: %s (%d)\n",
+			cgit_log("Unable to fill slot in %ldms %s (%s): %d: %s (%d)\n",
 			    td, slot->lock_name, slot->key,
 				ctx.cfg.cache_lock_fail, strerror(err), err);
 			unlock_slot(slot, UNLINK_LOCK_FILE);
 			close_lock(slot);
 			if (ctx.cfg.cache_lock_fail != 200) {
 				cgit_print_error_page(ctx.cfg.cache_lock_fail,
-				    "Cache: Could not fill slot within %ldms.", td);
+				    "Cache: Unable to fill slot within %ldms.", td);
 			} else {
 				slot->fn();
-				cache_log("[cgit] Uncached fill took %ldms %s (failed locked fill %s)\n",
+				cgit_log("Uncached fill took %ldms %s (failed locked fill %s)\n",
 					cgit_ts_ms_sub_current(&tNow1), slot->key, slot->lock_name);
 			}
 			return 0;
@@ -614,7 +563,7 @@ static int process_slot(struct cache_slot *slot)
 		unlock_slot(slot, REPLACE_OLD_SLOT);
 	} // else concurrent process produced slot (opened)
 	if ((err = print_slot(slot)) != 0 && err != ETIMEDOUT) {
-		cache_log("[cgit] error printing cache %s (%s): %s (%d)\n",
+		cgit_log("error printing cache %s (%s): %s (%d)\n",
 			  slot->cache_name, slot->key,
 			  strerror(err), err);
 	}
@@ -641,7 +590,7 @@ int cache_process(size_t size, const char *path, const char *key, int ttl,
 
 	/* Verify input, calculate filenames */
 	if (!path) {
-		cache_log("[cgit] Cache path not specified, caching is disabled\n");
+		cgit_log("Cache path not specified, caching is disabled\n");
 		fn();
 		return 0;
 	}
@@ -709,13 +658,13 @@ int cache_ls(const char *path)
 	size_t prefixlen;
 
 	if (!path) {
-		cache_log("[cgit] cache path not specified\n");
+		cgit_log("cache path not specified\n");
 		return -1;
 	}
 	dir = opendir(path);
 	if (!dir) {
 		err = errno;
-		cache_log("[cgit] unable to open path %s: %s (%d)\n",
+		cgit_log("unable to open path %s: %s (%d)\n",
 			  path, strerror(err), err);
 		return err;
 	}
@@ -729,7 +678,7 @@ int cache_ls(const char *path)
 		strbuf_addstr(&fullname, ent->d_name);
 		slot.cache_name = fullname.buf;
 		if ((err = open_slot(&slot)) != 0) {
-			cache_log("[cgit] unable to open path %s: %s (%d)\n",
+			cgit_log("unable to open path %s: %s (%d)\n",
 				  fullname.buf, strerror(err), err);
 			continue;
 		}
@@ -744,27 +693,4 @@ int cache_ls(const char *path)
 	closedir(dir);
 	strbuf_release(&fullname);
 	return 0;
-}
-
-/* Print a message to stdout */
-void cache_log(const char *format, ...)
-{
-	char buffer[400];
-	char *end = buffer + sizeof(buffer);
-	char *out = buffer;
-	*(end - 1) = 0;
-	struct tm tNowLocal;
-	time_t tNow = time(NULL);
-	struct tm *tres = localtime_r(&tNow, &tNowLocal);
-	if (tres == &tNowLocal) {
-		// 'YYYY-mm-dd hh:mm:ss '
-		out += strftime(out, 20 + 1, "%Y-%m-%d %H:%M:%S ", tres);
-	}
-	pid_t pid = getpid();
-	out += snprintf(out, end - out, "%7d ", pid); // '  38588'
-	va_list args;
-	va_start(args, format);
-	vsnprintf(out, end - out, format, args);
-	va_end(args);
-	fputs(buffer, stderr);
 }

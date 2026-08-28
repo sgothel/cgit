@@ -428,4 +428,12 @@ extern int cgit_ts_cmp(const struct timespec* lhs, const struct timespec* rhs);
 extern struct timespec *cgit_ts_current(struct timespec *ts);
 extern long cgit_ts_ms_sub_current(const struct timespec *ts);
 
+ssize_t cgit_write_to(int fd, const void *buf, size_t count, off_t *total_out,
+		      const struct timespec *tStart,
+		      struct timespec *tLastSend, long to_max);
+
+/* Print a message to stdout */
+__attribute__((format (printf,1,2)))
+extern void cgit_log(const char *format, ...);
+
 #endif /* CGIT_H */

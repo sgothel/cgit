@@ -685,3 +685,81 @@ long cgit_ts_ms_sub_current(const struct timespec *ts)
 	struct timespec tNow, tDiff;
 	return cgit_ts_to_ms( cgit_ts_sub(&tDiff, cgit_ts_current(&tNow), ts) );
 }
+
+#define MY_MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
+
+/**
+ * @param to_max maximum time for write transfer until timeout in milliseconds
+ */
+ssize_t cgit_write_to(int fd, const void *buf, size_t count, off_t *total_out,
+		      const struct timespec *tStart,
+		      struct timespec *tLastSend, long to_max)
+{
+	if (!count) {
+		return 0;
+	}
+	const char *p = buf;
+	ssize_t total = 0;
+	struct timespec tNow = *tLastSend;
+
+	do {
+		if (cgit_ts_ms_sub(&tNow, tLastSend) >= (long)ctx.cfg.client_io_idle_timeout) {
+			errno = ETIMEDOUT;
+			return -2;
+		}
+		if (cgit_ts_ms_sub(&tNow, tStart) > to_max) {
+			errno = ETIMEDOUT;
+			return -3;
+		}
+
+		ssize_t written = write(fd, p, MY_MIN(count, MAX_IO_SIZE));
+		cgit_ts_current(&tNow);
+		if (written < 0) {
+			if (errno == EINTR)
+				continue;
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				struct pollfd pfd;
+				pfd.fd = fd;
+				pfd.events = POLLOUT;
+				// no need to check for errors,
+				// subsequent read/write will detect unrecoverable errors
+				poll(&pfd, 1, -1);
+				continue;
+			}
+			return -1;
+		} else if (written > 0) {
+			*total_out += written;
+			count -= written;
+			p += written;
+			total += written;
+			*tLastSend = tNow;
+			if (!count)
+				return total;
+		}
+	} while (1);
+}
+
+/* Print a message to stderr, similar to `Apache2` error log */
+void cgit_log(const char *cgit_log, ...)
+{
+	char buffer[400];
+	char *end = buffer + sizeof(buffer);
+	char *out = buffer;
+	*(end - 1) = 0;
+	struct tm tNowLocal;
+	time_t tNow = time(NULL);
+	struct tm *tres = localtime_r(&tNow, &tNowLocal);
+	// Apache2: [Fri Aug 28 02:41:07.739456 2026] [cgid:error] [pid 2940541:tid 2940569] [client 1.1.1.1:2222] MESSAGE
+	// cgit:    [Fri Aug 28 02:58:17 2026] [cgit] [pid 1143667] [client 1.1.1.1:2222] MESSAGE
+	if (tres == &tNowLocal) {
+		out += strftime(out, 30 + 1, "[%a %b %d %H:%M:%S %Y] ", tres);    // '[Day Mon dd hh:mm:ss] '
+	}
+	pid_t pid = getpid();
+	out += snprintf(out, end - out, "[cgit] [pid %7d] [client %s:%d] ", // '  38588'
+		pid, ctx.env.remote_addr, ctx.env.remote_port);
+	va_list args;
+	va_start(args, cgit_log);
+	vsnprintf(out, end - out, cgit_log, args);
+	va_end(args);
+	fputs(buffer, stderr);
+}
