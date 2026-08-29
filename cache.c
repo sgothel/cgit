@@ -55,7 +55,7 @@ static int open_slot(struct cache_slot *slot)
 	ssize_t bufkeylen = -1;
 
 	slot->cache_fd = open(slot->cache_name, O_RDONLY);
-	if (slot->cache_fd == -1)
+	if (slot->cache_fd < 0)
 		return errno;
 
 	if (fstat(slot->cache_fd, &slot->cache_st))
@@ -80,7 +80,7 @@ static int open_slot(struct cache_slot *slot)
 static int close_slot(struct cache_slot *slot)
 {
 	int err = 0;
-	if (slot->cache_fd > 0) {
+	if (slot->cache_fd >= 0) {
 		if (close(slot->cache_fd))
 			err = errno;
 		slot->cache_fd = -1;
@@ -223,7 +223,7 @@ static int is_expired(struct cache_slot *slot)
 static int close_lock(struct cache_slot *slot)
 {
 	int err = 0;
-	if (slot->lock_fd > 0) {
+	if (slot->lock_fd >= 0) {
 		if (close(slot->lock_fd))
 			err = errno;
 		slot->lock_fd = -1;
@@ -310,7 +310,7 @@ static int lock_slot(struct cache_slot *slot, const struct timespec *tStart)
 	}
 	slot->lock_fd =
 	    open(slot->lock_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-	if (slot->lock_fd == -1) {
+	if (slot->lock_fd < 0) {
 		int saved_errno = errno;
 		cgit_log("Lock (%ldms): Unable to open/create lock slot %s (%s): %s (%d)\n",
 			  cgit_ts_ms_sub_current(tStart), slot->lock_name,
@@ -344,7 +344,7 @@ static int lock_slot(struct cache_slot *slot, const struct timespec *tStart)
 			  cgit_ts_ms_sub_current(tStart), wait_count, slot->cache_fd,
               slot->lock_name, slot->key);
 	}
-	if (slot->cache_fd <= 0) {
+	if (slot->cache_fd < 0) {
 		int err = open_slot(slot);
 		if (!err && slot->match) {
 			if(!is_expired(slot)) {
@@ -435,7 +435,7 @@ static int unlock_slot(struct cache_slot *slot, enum lock_file_op_t lock_file_op
 		close(slot->stdout_fd);
 		slot->stdout_fd = -1;
 	}
-	if (slot->lock_fd > 0) {
+	if (slot->lock_fd >= 0) {
 		if (fcntl(slot->lock_fd, F_SETLK, &lock) < 0) {
 			int saved_errno = errno;
 			close(slot->lock_fd);
@@ -462,7 +462,7 @@ static int fill_slot(struct cache_slot *slot)
 {
 	/* Preserve stdout */
 	slot->stdout_fd = dup(STDOUT_FILENO);
-	if (slot->stdout_fd == -1)
+	if (slot->stdout_fd < 0)
 		return errno;
 
 	/* Redirect stdout to lockfile */
@@ -596,7 +596,7 @@ static int process_slot(struct cache_slot *slot)
 	const long dt_lock = cgit_ts_ms_sub_current(&tStart);
 
 	long dt_git = 0;
-	if (slot->cache_fd <= 0) {
+	if (slot->cache_fd < 0) {
 		// first concurrent process lock
 		cgit_mark_termf("cache git [peek %ldms, lock %ldms]", dt_peek, dt_lock);
 		cgit_ts_current(&tStart);
