@@ -442,6 +442,25 @@ ssize_t cgit_write_to(int fd, const void *buf, size_t count, off_t *total_out,
 
 /* Print a message to stdout */
 __attribute__((format (printf,1,2)))
-extern void cgit_log(const char *format, ...);
+extern ssize_t cgit_log(const char *format, ...);
+
+/* AS-Safe long integer to string conversion w/ optional thousand separator. */
+extern size_t to_decstr(char *dest, size_t dest_sz, const long val, const char separator);
+
+/* AS-Safe long integer append. Reduces dest_sz and returns pointer within dest after last written char. */
+char *cgit_appendl(char *dest, size_t *dest_sz, const long val, const char separator);
+/* AS-Safe string append. Reduces dest_sz and returns pointer within dest after last written char. */
+char *cgit_appends(char *dest, size_t *dest_sz, const char *src);
+/* AS-Safe log-header append. Reduces dest_sz and returns pointer within dest after last written char. */
+char *cgit_append_log(char *dest, size_t *dest_sz, const char *start_timestr, long elapsedMS, const char *src);
+
+/* fork() wrapper, registering child pid to shutdown handler */
+extern pid_t cgit_fork();
+
+/* Set a code-mark to be logged for a potential termination via SIGALARM. */
+extern void cgit_mark_term(const char *mark);
+/* Set a code-mark to be logged for a potential termination via SIGALARM. */
+__attribute__((format (printf,1,2)))
+void cgit_mark_termf(const char *format, ...);
 
 #endif /* CGIT_H */

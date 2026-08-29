@@ -980,7 +980,7 @@ static void process_cached_repolist(const char *path)
 	 * rescan the specified path and generate a new cached repolist
 	 * in a child-process to avoid latency for the current request.
 	 */
-	if (fork())
+	if (cgit_fork())
 		goto out;
 
 	exit(generate_cached_repolist(path, cached_rc.buf));
@@ -1087,27 +1087,8 @@ static NORETURN void cgit_die_routine(const char *msg, va_list params)
 	exit(0);
 }
 
-typedef void (*sighandler_t)(int);
-
-static sighandler_t cgit_sh_alrm_orig;
-static const char *cgit_query;
-static struct timespec cgit_start;
-
-static void cgit_sighandler(int sig)
-{
-	static struct timespec now;
-	cgit_ts_current(&now);
-	const long dt = cgit_ts_ms_sub(&now, &cgit_start);
-	switch (sig)
-	{
-		case SIGALRM:
-			cgit_log("SIGALRM after %ldms, query %s\n", dt, cgit_query);
-			cgit_sh_alrm_orig(sig);
-			break;
-		default:
-			cgit_log("SIGNAL (%d) after %ldms, query %s\n", sig, dt, ctx.qry.name);
-	}
-}
+/* Essential for cgit instances w/o receiving signals from httpd, e.g. Apache2 + suEXEC. */
+extern void cgit_install_alarm(int timeout, const char* query);
 
 int cmd_main(int argc, const char **argv)
 {
@@ -1168,18 +1149,7 @@ int cmd_main(int argc, const char **argv)
 	if (!ctx.env.authenticated || (ctx.env.request_method && !strcmp(ctx.env.request_method, "HEAD")))
 		ctx.cfg.cache_size = 0;
 
-	/* Essential for cgit instances w/o receiving signals from httpd, e.g. Apache2 + suEXEC. */
-	if (ctx.cfg.timeout > 0)
-	{
-		cgit_query = ctx.qry.raw;
-		cgit_ts_current(&cgit_start);
-		if (SIG_ERR == (cgit_sh_alrm_orig = signal(SIGALRM, cgit_sighandler))) {
-			cgit_log("Unable to install SIGALRM handler\n");
-			exit(-1);
-		}
-		alarm(ctx.cfg.timeout);
-	}
-
+	cgit_install_alarm(ctx.cfg.timeout, ctx.qry.raw);
 	err = cache_process(ctx.cfg.cache_size, ctx.cfg.cache_root,
 			    ctx.qry.raw, ttl, process_request);
 	cgit_cleanup_filters();

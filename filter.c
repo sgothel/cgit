@@ -51,7 +51,7 @@ static int open_exec_filter(struct cgit_filter *base, va_list ap)
 	filter->old_stdout = chk_positive(dup(STDOUT_FILENO),
 		"Unable to duplicate STDOUT");
 	chk_zero(pipe(pipe_fh), "Unable to create pipe to subprocess");
-	filter->pid = chk_non_negative(fork(), "Unable to create subprocess");
+	filter->pid = chk_non_negative(cgit_fork(), "Unable to create subprocess");
 	if (filter->pid == 0) {
 		close(pipe_fh[1]);
 		chk_non_negative(dup2(pipe_fh[0], STDIN_FILENO),

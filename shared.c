@@ -8,6 +8,9 @@
 
 #include <limits.h>
 #include <time.h>
+#include <signal.h>
+#include <string.h>
+#include <stdio.h>
 
 #define USE_THE_REPOSITORY_VARIABLE
 
@@ -686,6 +689,8 @@ long cgit_ts_ms_sub_current(const struct timespec *ts)
 	return cgit_ts_to_ms( cgit_ts_sub(&tDiff, cgit_ts_current(&tNow), ts) );
 }
 
+
+
 #define MY_MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 
 /**
@@ -740,7 +745,8 @@ ssize_t cgit_write_to(int fd, const void *buf, size_t count, off_t *total_out,
 }
 
 /* Print a message to stderr, similar to `Apache2` error log */
-void cgit_log(const char *cgit_log, ...)
+__attribute__((format (printf,1,2)))
+ssize_t cgit_log(const char *format, ...)
 {
 	char buffer[400];
 	char *end = buffer + sizeof(buffer);
@@ -752,14 +758,226 @@ void cgit_log(const char *cgit_log, ...)
 	// Apache2: [Fri Aug 28 02:41:07.739456 2026] [cgid:error] [pid 2940541:tid 2940569] [client 1.1.1.1:2222] MESSAGE
 	// cgit:    [Fri Aug 28 02:58:17 2026] [cgit] [pid 1143667] [client 1.1.1.1:2222] MESSAGE
 	if (tres == &tNowLocal) {
-		out += strftime(out, 30 + 1, "[%a %b %d %H:%M:%S %Y] ", tres);    // '[Day Mon dd hh:mm:ss] '
+		out += strftime(out, 30 + 1, "[%a %b %d %H:%M:%S %Y] ", tres);    // '[Day Mon dd hh:mm:ss YYYY] '
 	}
 	pid_t pid = getpid();
 	out += snprintf(out, end - out, "[cgit] [pid %7d] [client %s:%d] ", // '  38588'
 		pid, ctx.env.remote_addr, ctx.env.remote_port);
 	va_list args;
-	va_start(args, cgit_log);
-	vsnprintf(out, end - out, cgit_log, args);
+	va_start(args, format);
+	vsnprintf(out, end - out, format, args);
 	va_end(args);
-	fputs(buffer, stderr);
+	return fputs(buffer, stderr);
+}
+
+/** str[size] including EOS. */
+size_t to_decstr(char *dest, size_t dest_sz, const long val, const char separator) {
+	if (!dest_sz) {
+		return 0;
+	}
+	unsigned long v = (unsigned long)val;
+	const uint32_t sign_len = val >= 0 ? 0 : 1;
+	// reverse output (relieves us from needing log10 for digits)
+	const char* const d_end = dest + dest_sz - 1; // EOS reserved
+	const char* const d_end_num = d_end - sign_len;
+	char* e = dest;
+	*e = 0;
+	uint32_t digit_cnt = 0;
+	while (e < d_end_num && (v!=0 || e==dest)) {
+		if (separator && 0 < digit_cnt && 0 == digit_cnt % 3) {
+			*(++e) = separator;
+		}
+		if (e < d_end_num) {
+			*(++e) = '0' + (v % 10);
+			v /= 10;
+			++digit_cnt;
+		}
+	}
+	if (sign_len && e < d_end) {
+		*(--e) = '-';
+	}
+	size_t len = e - dest; // w/o EOS
+	// reverse
+	char * s = dest;
+	char t;
+	while (e>s) {
+		t = *s;
+		*s = *e;
+		*e = t;
+		++s;
+		--e;
+	}
+	return len;
+}
+
+char *cgit_appendl(char *dest, size_t *dest_sz, const long val, const char separator)
+{
+	char src[100];
+	size_t len = MY_MIN(*dest_sz - 1, to_decstr(src, 100, val, separator));
+	if (!len) {
+		return dest;
+	}
+	mempcpy(dest, src, len);
+	*dest_sz -= len;
+	if (*dest_sz>0) {
+		dest[len]=0;
+	}
+	return dest + len;
+}
+
+char *cgit_appends(char *dest, size_t *dest_sz, const char *src)
+{
+	size_t len = strnlen(src, *dest_sz-1);
+	if (!len) {
+		return dest;
+	}
+	mempcpy(dest, src, len);
+	*dest_sz -= len;
+	if (*dest_sz>0) {
+		dest[len]=0;
+	}
+	return dest + len;
+}
+
+char *cgit_append_log(char *dest, size_t *dest_sz, const char *start_timestr, long elapsedMS, const char *src)
+{
+	// [Fri Aug 28 02:58:17 2026 + 1'000ms] [cgit] [pid 1143667] [client 1.1.1.1:2222] MESSAGE
+	dest = cgit_appends(dest, dest_sz, "[");
+	dest = cgit_appends(dest, dest_sz, start_timestr);
+	dest = cgit_appends(dest, dest_sz, " + ");
+	dest = cgit_appendl(dest, dest_sz, elapsedMS, '\'');
+	dest = cgit_appends(dest, dest_sz, "ms] [cgit] [pid ");
+	dest = cgit_appendl(dest, dest_sz, (long)getpid(), 0);
+	dest = cgit_appends(dest, dest_sz, "] [client ");
+	dest = cgit_appends(dest, dest_sz, ctx.env.remote_addr);
+	dest = cgit_appends(dest, dest_sz, ":");
+	dest = cgit_appendl(dest, dest_sz, ctx.env.remote_port, 0);
+	dest = cgit_appends(dest, dest_sz, "] ");
+	return cgit_appends(dest, dest_sz, src);
+}
+
+
+
+typedef void (*sighandler_t)(int);
+
+enum { max_proc = 16 };
+
+struct term_ctx_t {
+	struct timespec start;
+	char start_timestr[32];
+	const char *query;
+	sighandler_t sh_alrm_orig;
+	volatile pid_t child_proc[max_proc];
+	volatile size_t child_count;
+	char mark[80];
+	volatile size_t mark_len;
+	volatile int initialized; /* TODO: make it thread-safe if desired */
+};
+static struct term_ctx_t term_ctx = {0};
+
+/* fork() wrapper, registering child pid to shutdown handler */
+pid_t cgit_fork() {
+	const pid_t p = fork();
+	if (p>0 && term_ctx.child_count<max_proc) {
+		term_ctx.child_proc[term_ctx.child_count++] = p;
+	}
+	return p;
+}
+
+static void cgit_kill_child_proc() {
+	size_t n = term_ctx.child_count;
+	term_ctx.child_count = 0;
+	for(size_t i = n; i-- > 0; ) {
+		kill(term_ctx.child_proc[i], SIGTERM);
+	}
+}
+
+static void cgit_alarm_sighandler(int sig)
+{
+	static struct timespec now;
+	cgit_ts_current(&now);
+	const long dt_ms = cgit_ts_ms_sub(&now, &term_ctx.start);
+	if (sig != SIGALRM) {
+		return;
+	}
+	{
+		char dest_mem[512];
+		size_t dest_sz = sizeof(dest_mem);
+		char *dest = dest_mem;
+		dest = cgit_append_log(dest, &dest_sz, term_ctx.start_timestr, dt_ms, "SIGALRM @ '");
+		if (term_ctx.mark_len) {
+			dest = cgit_appends(dest, &dest_sz, term_ctx.mark);
+		} else {
+			dest = cgit_appends(dest, &dest_sz, "undef");
+		}
+		dest = cgit_appends(dest, &dest_sz, "', childs ");
+		dest = cgit_appendl(dest, &dest_sz, (long)term_ctx.child_count, '\'');
+		dest = cgit_appends(dest, &dest_sz, ", query ");
+		dest = cgit_appends(dest, &dest_sz, term_ctx.query);
+		dest = cgit_appends(dest, &dest_sz, "\n");
+		write(2, dest_mem, dest-dest_mem);
+	}
+	if (term_ctx.sh_alrm_orig == SIG_IGN) {
+		cgit_kill_child_proc();
+		_exit(EXIT_FAILURE);
+	} else if (term_ctx.sh_alrm_orig == SIG_DFL) {
+		signal(sig, SIG_DFL);
+		cgit_kill_child_proc();
+		raise(sig);
+		// should never be reached
+		_exit(EXIT_FAILURE);
+	} else {
+		// custom handler
+		cgit_kill_child_proc();
+		term_ctx.sh_alrm_orig(sig);
+	}
+}
+
+void cgit_mark_term(const char *mark) {
+	const size_t dlen = strnlen(mark, sizeof(term_ctx.mark)-1);
+	term_ctx.mark_len = 0;
+	memset(term_ctx.mark, 0, sizeof(term_ctx.mark));
+	mempcpy(term_ctx.mark, mark, dlen);
+	term_ctx.mark_len = dlen;
+}
+__attribute__((format (printf,1,2)))
+void cgit_mark_termf(const char *format, ...) {
+	va_list args;
+	va_start(args, format);
+	term_ctx.mark_len = 0;
+	memset(term_ctx.mark, 0, sizeof(term_ctx.mark));
+	term_ctx.mark_len = vsnprintf(term_ctx.mark, sizeof(term_ctx.mark), format, args);
+	va_end(args);
+}
+
+/* Essential for cgit instances w/o receiving signals from httpd, e.g. Apache2 + suEXEC. */
+void cgit_install_alarm(int timeout, const char* query) {
+	if (timeout <= 0 || term_ctx.initialized) {
+		return;
+	}
+	cgit_ts_current(&term_ctx.start);
+	{
+		struct tm tNowLocal;
+		time_t tNow = time(NULL);
+		struct tm *tres = localtime_r(&tNow, &tNowLocal);
+		if (tres == &tNowLocal) {
+			strftime(term_ctx.start_timestr, sizeof(term_ctx.start_timestr), "%a %b %d %H:%M:%S %Y", tres);    // 'Day Mon dd hh:mm:ss YYYY'
+		} else {
+			term_ctx.start_timestr[0]=0;
+		}
+	}
+	term_ctx.query = query;
+	memset(term_ctx.mark, 0, sizeof(term_ctx.mark));
+
+	struct sigaction new_act = {0};
+	struct sigaction old_act = {0};
+	new_act.sa_handler = &cgit_alarm_sighandler;
+	if (sigaction(SIGALRM, &new_act, &old_act) == -1)
+	{
+		cgit_log("Unable to install SIGALRM handler\n");
+		exit(-1);
+	}
+	term_ctx.sh_alrm_orig = old_act.sa_handler;
+	alarm(timeout);
+	term_ctx.initialized = 1;
 }

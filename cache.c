@@ -545,20 +545,26 @@ static int process_slot(struct cache_slot *slot)
 	int err;
 	struct timespec tStart;
 
+	cgit_mark_term("cache start");
+	cgit_ts_current(&tStart);
 	err = open_slot(slot);
 	if (!err && slot->match && !is_expired(slot)) {
+		const long dt_peek = cgit_ts_ms_sub_current(&tStart);
+		cgit_mark_termf("cache print [peek %ldms]", dt_peek);
 		if (!err && ctx.cfg.log_level >= LOG_LVL_WARN+1) {
 			cgit_log("Using hash matching slot %s (%s)\n",
 				  slot->lock_name, slot->key);
 		}
 		if ((err = print_slot(slot)) != 0 && err != ETIMEDOUT) {
-			cgit_log("error printing cache %s (%s): %s (%d)\n",
+			cgit_log("error printing cache within %ldms [peek %ldms], %s (%s): %s (%d)\n",
+				  cgit_ts_ms_sub_current(&tStart)-dt_peek, dt_peek,
 				  slot->cache_name, slot->key, strerror(err), err);
 		}
 		close_slot(slot);
 		return err;
 	}
 	close_slot(slot);
+	const long dt_peek = cgit_ts_ms_sub_current(&tStart);
 
 	/* If the cache slot does not exist (or its key doesn't match the
 	 * current key), lets try to create a new cache slot for this
@@ -570,39 +576,38 @@ static int process_slot(struct cache_slot *slot)
 	 * above `open_slot` and within `lock_slot`, we'll just
 	 * serve the new content from the new cachefile.
 	 */
+	cgit_mark_termf("cache lock [peek %ldms]", dt_peek);
 	cgit_ts_current(&tStart);
 	if ((err = lock_slot(slot, &tStart)) != 0) {
+		const long dt_lock = cgit_ts_ms_sub_current(&tStart);
 		if (ctx.cfg.cache_lock_fail != 200) {
 			cgit_print_error_page(ctx.cfg.cache_lock_fail,
-			    "Cache: Unable to lock new-slot within %ldms.",
-			    cgit_ts_ms_sub_current(&tStart));
+			    "Cache: Unable to lock new-slot within %ldms.", dt_lock);
 		} else {
+			cgit_mark_termf("cache-lock-fail, git [peek %ldms, lock %ldms]", dt_peek, dt_lock);
 			cgit_ts_current(&tStart);
 			slot->fn();
-			cgit_log("Uncached fill took %ldms %s (failed lock %s)\n",
-				  cgit_ts_ms_sub_current(&tStart), slot->key, slot->lock_name);
+			cgit_log("Uncached fill took %ldms %s (peek %ldms, failed lock %ldms, %s)\n",
+				  cgit_ts_ms_sub_current(&tStart), slot->key,
+				  dt_peek, dt_lock, slot->lock_name);
 		}
 		return 0;
 	}
+	const long dt_lock = cgit_ts_ms_sub_current(&tStart);
+
+	long dt_git = 0;
 	if (slot->cache_fd <= 0) {
 		// first concurrent process lock
+		cgit_mark_termf("cache git [peek %ldms, lock %ldms]", dt_peek, dt_lock);
 		cgit_ts_current(&tStart);
-		if ((err = fill_slot(slot)) != 0) {
-			struct timespec tNow1;
-			long td = cgit_ts_ms_sub(cgit_ts_current(&tNow1), &tStart);
-			cgit_log("Unable to fill slot in %ldms %s (%s): %d: %s (%d)\n",
-			    td, slot->lock_name, slot->key,
-				ctx.cfg.cache_lock_fail, strerror(err), err);
+		err = fill_slot(slot);
+		dt_git = cgit_ts_ms_sub_current(&tStart);
+		if (err != 0) {
 			unlock_slot(slot, UNLINK_LOCK_FILE);
 			close_lock(slot);
-			if (ctx.cfg.cache_lock_fail != 200) {
-				cgit_print_error_page(ctx.cfg.cache_lock_fail,
-				    "Cache: Unable to fill slot within %ldms.", td);
-			} else {
-				slot->fn();
-				cgit_log("Uncached fill took %ldms %s (failed locked fill %s)\n",
-					cgit_ts_ms_sub_current(&tNow1), slot->key, slot->lock_name);
-			}
+			cgit_log("Unable to fill slot in %ldms %s (peek %ldms, lock %ldms, %s): %s (%d)\n",
+				 dt_git, slot->lock_name, dt_peek, dt_lock, slot->key, strerror(err), err);
+			cgit_print_error_page(429, "Cache: Unable to fill slot within %ldms.", dt_git);
 			return 0;
 		}
 		// We've got a valid cache slot in the lock file, which
@@ -615,12 +620,15 @@ static int process_slot(struct cache_slot *slot)
 		slot->cache_fd = slot->lock_fd;
 		unlock_slot(slot, REPLACE_OLD_SLOT);
 	} // else concurrent process produced slot (opened)
+
+	cgit_mark_termf("cache print [peek %ldms, lock %ldms, git %ldms]", dt_peek, dt_lock, dt_git);
 	if ((err = print_slot(slot)) != 0 && err != ETIMEDOUT) {
 		cgit_log("error printing cache %s (%s): %s (%d)\n",
 			  slot->cache_name, slot->key,
 			  strerror(err), err);
 	}
 	close_slot(slot);
+	cgit_mark_termf("cache end [peek %ldms, lock %ldms, git %ldms]", dt_peek, dt_lock, dt_git);
 	return err;
 }
 
