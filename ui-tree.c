@@ -98,6 +98,19 @@ static void print_object(const struct object_id *oid, const char *path, const ch
 		cgit_print_error_page(404, "Bad object name: %s", oid_to_hex(oid));
 		return;
 	}
+	if (ctx.cfg.max_blob_size && size / 1024 > ctx.cfg.max_blob_size) { // first size check
+		cgit_set_title_from_path(path);
+		cgit_print_layout_start();
+		htmlf("blob: %s (", oid_to_hex(oid));
+		cgit_plain_link("plain", NULL, NULL, ctx.qry.head, rev, path);
+		if (ctx.repo->enable_blame && !is_binary) {
+			html(") (");
+			cgit_blame_link("blame", NULL, NULL, ctx.qry.head, rev, path);
+		}
+		htmlf(")\n<div class='error'>blob size (%ldKB) exceeds display size limit (%dKB).</div>",
+				size / 1024, ctx.cfg.max_blob_size);
+		return;
+	}
 
 	buf = odb_read_object(the_repository->objects, oid, &type, &size);
 	if (!buf) {
@@ -117,8 +130,8 @@ static void print_object(const struct object_id *oid, const char *path, const ch
 	}
 	html(")\n");
 
-	if (ctx.cfg.max_blob_size && size / 1024 > ctx.cfg.max_blob_size) {
-		htmlf("<div class='error'>blob size (%ldKB) exceeds display size limit (%dKB).</div>",
+	if (ctx.cfg.max_blob_size && size / 1024 > ctx.cfg.max_blob_size) { // post-read size check
+		htmlf("<div class='error'>blob size (%ldKB) exceeds display size limit (%dKB) <i>(post)</i>.</div>",
 				size / 1024, ctx.cfg.max_blob_size);
 		return;
 	}

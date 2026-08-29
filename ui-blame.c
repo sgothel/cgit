@@ -125,6 +125,16 @@ static void print_object(const struct object_id *oid, const char *path,
 	if (type == OBJ_BAD) {
 		cgit_print_error_page(404, "Bad object name: %s", oid_to_hex(oid));
 		return;
+	}
+	if (ctx.cfg.max_blob_size && size / 1024 > ctx.cfg.max_blob_size) { // first size check
+		cgit_set_title_from_path(path);
+		cgit_print_layout_start();
+		htmlf("blob: %s (", oid_to_hex(oid));
+		cgit_plain_link("plain", NULL, NULL, ctx.qry.head, rev, path);
+		html(") (");
+		cgit_tree_link("tree", NULL, NULL, ctx.qry.head, rev, path);
+		htmlf(")\n<div class='error'>blob size (%ldKB) exceeds display size limit (%dKB).</div>",
+				size / 1024, ctx.cfg.max_blob_size);
 		return;
 	}
 
@@ -166,9 +176,8 @@ static void print_object(const struct object_id *oid, const char *path,
 		html("<div class='error'>blob is binary.</div>");
 		goto cleanup;
 	}
-	if (ctx.cfg.max_blob_size && size / 1024 > ctx.cfg.max_blob_size) {
-		htmlf("<div class='error'>blob size (%ldKB)"
-		      " exceeds display size limit (%dKB).</div>",
+	if (ctx.cfg.max_blob_size && size / 1024 > ctx.cfg.max_blob_size) { // post-read size check
+		htmlf("<div class='error'>blob size (%ldKB) exceeds display size limit (%dKB) <i>(post)</i>.</div>",
 		      size / 1024, ctx.cfg.max_blob_size);
 		goto cleanup;
 	}
