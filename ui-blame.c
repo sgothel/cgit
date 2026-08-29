@@ -123,15 +123,14 @@ static void print_object(const struct object_id *oid, const char *path,
 
 	type = odb_read_object_info(the_repository->objects, oid, &size);
 	if (type == OBJ_BAD) {
-		cgit_print_error_page(404, "Bad object name: %s",
-				      oid_to_hex(oid));
+		cgit_print_error_page(404, "Bad object name: %s", oid_to_hex(oid));
+		return;
 		return;
 	}
 
 	buf = odb_read_object(the_repository->objects, oid, &type, &size);
 	if (!buf) {
-		cgit_print_error_page(500,
-			"Error reading object %s", oid_to_hex(oid));
+		cgit_print_error_page(500, "Error reading object %s", oid_to_hex(oid));
 		return;
 	}
 

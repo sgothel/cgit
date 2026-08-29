@@ -95,15 +95,13 @@ static void print_object(const struct object_id *oid, const char *path, const ch
 
 	type = odb_read_object_info(the_repository->objects, oid, &size);
 	if (type == OBJ_BAD) {
-		cgit_print_error_page(404,
-			"Bad object name: %s", oid_to_hex(oid));
+		cgit_print_error_page(404, "Bad object name: %s", oid_to_hex(oid));
 		return;
 	}
 
 	buf = odb_read_object(the_repository->objects, oid, &type, &size);
 	if (!buf) {
-		cgit_print_error_page(500,
-			"Error reading object %s", oid_to_hex(oid));
+		cgit_print_error_page(500, "Error reading object %s", oid_to_hex(oid));
 		return;
 	}
 	is_binary = buffer_is_binary(buf, size);
@@ -112,12 +110,10 @@ static void print_object(const struct object_id *oid, const char *path, const ch
 
 	cgit_print_layout_start();
 	htmlf("blob: %s (", oid_to_hex(oid));
-	cgit_plain_link("plain", NULL, NULL, ctx.qry.head,
-		        rev, path);
+	cgit_plain_link("plain", NULL, NULL, ctx.qry.head, rev, path);
 	if (ctx.repo->enable_blame && !is_binary) {
 		html(") (");
-		cgit_blame_link("blame", NULL, NULL, ctx.qry.head,
-			        rev, path);
+		cgit_blame_link("blame", NULL, NULL, ctx.qry.head, rev, path);
 	}
 	html(")\n");
 
