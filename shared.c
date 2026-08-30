@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #define USE_THE_REPOSITORY_VARIABLE
 
@@ -692,6 +693,7 @@ long cgit_ts_ms_sub_current(const struct timespec *ts)
 
 
 #define MY_MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
+#define MY_MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
 
 /**
  * @param to_max maximum time for write transfer until timeout in milliseconds
@@ -738,6 +740,9 @@ ssize_t cgit_write_to(int fd, const void *buf, size_t count, off_t *total_out,
 			p += written;
 			total += written;
 			*tLastSend = tNow;
+			if (fd == STDOUT_FILENO) {
+				cgit_sentnotify_term(written);
+			}
 			if (!count)
 				return total;
 		}
@@ -856,22 +861,24 @@ char *cgit_append_log(char *dest, size_t *dest_sz, const char *start_timestr, lo
 	return cgit_appends(dest, dest_sz, src);
 }
 
-
-
 typedef void (*sighandler_t)(int);
 
 enum { max_proc = 16 };
 
 struct term_ctx_t {
+	int stdout_fd;
+	int stderr_fd;
 	struct timespec start;
 	char start_timestr[32];
-	const char *query;
+	const char* query;
 	sighandler_t sh_alrm_orig;
 	volatile pid_t child_proc[max_proc];
 	volatile size_t child_count;
 	char mark[80];
 	volatile size_t mark_len;
-	volatile int initialized; /* TODO: make it thread-safe if desired */
+	volatile size_t sent_to_client; /* known bytes sent to client */
+	volatile int    sent_to_client_mask; /* don't accumulate bytes sent to client */
+	volatile int initialized;	/* TODO: make it thread-safe if desired */
 };
 static struct term_ctx_t term_ctx = {0};
 
@@ -894,13 +901,41 @@ static void cgit_kill_child_proc() {
 
 static void cgit_alarm_sighandler(int sig)
 {
-	static struct timespec now;
-	cgit_ts_current(&now);
-	const long dt_ms = cgit_ts_ms_sub(&now, &term_ctx.start);
-	if (sig != SIGALRM) {
+	if (sig != SIGALRM || !term_ctx.initialized) {
 		return;
 	}
+	/* Restore stdout, stderr. */
+	if (term_ctx.stdout_fd >= 0) {
+		dup2(term_ctx.stdout_fd, STDOUT_FILENO);
+		term_ctx.stdout_fd = -1;
+	}
+	if (term_ctx.stderr_fd >= 0) {
+		dup2(term_ctx.stderr_fd, STDERR_FILENO);
+		term_ctx.stderr_fd = -1;
+	}
 	{
+		static struct timespec now;
+		cgit_ts_current(&now);
+		const long dt_ms = cgit_ts_ms_sub(&now, &term_ctx.start);
+		size_t error_page_bytes = 0;
+		size_t error_page_bytes_sent = 0;
+		long dt_sent = 0;
+
+		if (0 == term_ctx.sent_to_client) {
+			static const char error_page[] =
+			    "Status: 429 Too Many Requests\n"
+			    "Content-type: text/html; charset=UTF-8\n"
+			    "Retry-After: 42\n"
+			    "\n"
+			    "<!DOCTYPE html>\n"
+			    "<html lang='en'><head><title>429 - cgit error</title>"
+			    "<meta name='generator' content='cgit '/><meta name='robots' content='index, nofollow'/></head>\n"
+			    "<body><p>cgit is currently being overrun by bots. Please try again later.</p></body></html>\n";
+			error_page_bytes = sizeof(error_page);
+			ssize_t e;
+			error_page_bytes_sent = ( e = write(STDOUT_FILENO, error_page, error_page_bytes) ) ? e : 0;
+			dt_sent = cgit_ts_ms_sub_current(&now);
+		}
 		char dest_mem[512];
 		size_t dest_sz = sizeof(dest_mem);
 		char *dest = dest_mem;
@@ -910,12 +945,24 @@ static void cgit_alarm_sighandler(int sig)
 		} else {
 			dest = cgit_appends(dest, &dest_sz, "undef");
 		}
-		dest = cgit_appends(dest, &dest_sz, "', childs ");
+		dest = cgit_appends(dest, &dest_sz, "', ");
+		if (0 == term_ctx.sent_to_client) {
+			dest = cgit_appends(dest, &dest_sz, "error-page[");
+			dest = cgit_appendl(dest, &dest_sz, (long)error_page_bytes_sent, '\'');
+			dest = cgit_appends(dest, &dest_sz, "B/");
+			dest = cgit_appendl(dest, &dest_sz, (long)error_page_bytes, '\'');
+			dest = cgit_appends(dest, &dest_sz, "B in ");
+			dest = cgit_appendl(dest, &dest_sz, (long)dt_sent, '\'');
+			dest = cgit_appends(dest, &dest_sz, "ms] sent, childs ");
+		} else {
+			dest = cgit_appendl(dest, &dest_sz, (long)term_ctx.sent_to_client, '\'');
+			dest = cgit_appends(dest, &dest_sz, "B sent, childs ");
+		}
 		dest = cgit_appendl(dest, &dest_sz, (long)term_ctx.child_count, '\'');
 		dest = cgit_appends(dest, &dest_sz, ", query ");
 		dest = cgit_appends(dest, &dest_sz, term_ctx.query);
 		dest = cgit_appends(dest, &dest_sz, "\n");
-		write(2, dest_mem, dest-dest_mem);
+		write(STDERR_FILENO, dest_mem, dest-dest_mem);
 	}
 	if (term_ctx.sh_alrm_orig == SIG_IGN) {
 		cgit_kill_child_proc();
@@ -950,11 +997,27 @@ void cgit_mark_termf(const char *format, ...) {
 	va_end(args);
 }
 
+void cgit_sentnotify_term(size_t bytes) {
+	if (!term_ctx.sent_to_client_mask) {
+		term_ctx.sent_to_client = term_ctx.sent_to_client + bytes;
+	}
+}
+
+void cgit_sentmask_term(int mask) {
+	term_ctx.sent_to_client_mask = mask;
+}
+
+void cgit_sentreset_term() {
+	term_ctx.sent_to_client = 0;
+}
+
 /* Essential for cgit instances w/o receiving signals from httpd, e.g. Apache2 + suEXEC. */
 void cgit_install_alarm(int timeout, const char* query) {
 	if (timeout <= 0 || term_ctx.initialized) {
 		return;
 	}
+	term_ctx.stdout_fd = dup(STDOUT_FILENO);
+	term_ctx.stderr_fd = dup(STDERR_FILENO);
 	cgit_ts_current(&term_ctx.start);
 	{
 		struct tm tNowLocal;
@@ -978,6 +1041,6 @@ void cgit_install_alarm(int timeout, const char* query) {
 		exit(-1);
 	}
 	term_ctx.sh_alrm_orig = old_act.sa_handler;
-	alarm(timeout);
 	term_ctx.initialized = 1;
+	alarm(timeout);
 }

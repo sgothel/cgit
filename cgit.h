@@ -461,6 +461,13 @@ extern pid_t cgit_fork();
 extern void cgit_mark_term(const char *mark);
 /* Set a code-mark to be logged for a potential termination via SIGALARM. */
 __attribute__((format (printf,1,2)))
-void cgit_mark_termf(const char *format, ...);
+extern void cgit_mark_termf(const char *format, ...);
+
+/* Notify about sent bytes to client for a potential termination via SIGALARM. */
+extern void cgit_sentnotify_term(size_t bytes);
+/* Mask (disable) or unmask (enable) notification about sent bytes to client for a potential termination via SIGALARM. */
+extern void cgit_sentmask_term(int mask);
+/* Notify about zero sent bytes to client for a potential termination via SIGALARM. */
+extern void cgit_sentreset_term();
 
 #endif /* CGIT_H */

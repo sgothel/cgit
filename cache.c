@@ -469,6 +469,9 @@ static int fill_slot(struct cache_slot *slot)
 	if (dup2(slot->lock_fd, STDOUT_FILENO) == -1)
 		return errno;
 
+	if (0 == strncmp("cgit_test_key_alrm_inside_git", slot->key, 21)) {
+		raise(SIGALRM);
+	}
 	/* Generate cache content */
 	slot->fn();
 
@@ -599,6 +602,7 @@ static int process_slot(struct cache_slot *slot)
 	if (slot->cache_fd < 0) {
 		// first concurrent process lock
 		cgit_mark_termf("cache git [peek %ldms, lock %ldms]", dt_peek, dt_lock);
+		cgit_sentmask_term(1);
 		cgit_ts_current(&tStart);
 		err = fill_slot(slot);
 		dt_git = cgit_ts_ms_sub_current(&tStart);
@@ -619,9 +623,13 @@ static int process_slot(struct cache_slot *slot)
 		// the lock file.
 		slot->cache_fd = slot->lock_fd;
 		unlock_slot(slot, REPLACE_OLD_SLOT);
+		cgit_sentmask_term(0);
 	} // else concurrent process produced slot (opened)
 
 	cgit_mark_termf("cache print [peek %ldms, lock %ldms, git %ldms]", dt_peek, dt_lock, dt_git);
+	if (0 == strncmp("cgit_test_key_alrm_post_git", slot->key, 21)) {
+		raise(SIGALRM);
+	}
 	if ((err = print_slot(slot)) != 0 && err != ETIMEDOUT) {
 		cgit_log("error printing cache %s (%s): %s (%d)\n",
 			  slot->cache_name, slot->key,
