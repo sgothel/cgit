@@ -233,21 +233,21 @@ struct cgit_config {
 	int cache_static_ttl;
 	int cache_about_ttl;
 	int cache_snapshot_ttl;
-	/* cache lock fail action as http-response code. 200 returns un-cached processed content, otherwise an error page of same code is served. Defaults to 200 (OK). */
+	/* cache lock fail action as http-response code. 200 returns un-cached processed content, otherwise an error page of same code is served. Defaults to 429 (Too Many Requests). */
 	int cache_lock_fail;
-	/* cache lock fail http-header `Retry-After` value in seconds, used if cache-lock-fail is not 200 (OK) and serves an error page. Default to 30s. */
+	/* cache lock fail http-header `Retry-After` value in seconds, used if cache-lock-fail is not 200 (OK) and serves an error page. Default to 42s. */
 	int cache_lock_retry;
-	/* cache lock timeout in milliseconds to acquire the cache lock-file against concurrent processes. Defaults to 1000ms. */
+	/* cache lock timeout in milliseconds to acquire the cache lock-file against concurrent processes. Defaults to 2000ms. */
 	int cache_lock_timeout;
-	/* idle timeout in milliseconds between sending/receiving chunks of the cached body to/from the client. Defaults to 20000ms. */
+	/* idle timeout in milliseconds between sending/receiving chunks of the cached body to/from the client. Defaults to 5000ms. */
 	int client_io_idle_timeout;
-	/* minimum transfer rate in Bps for sending/receiving a full cached body to/from the client. Defaults to 500 Bps. */
+	/* minimum transfer rate in Bps for sending/receiving a full cached body to/from the client. Defaults to 10000 Bps. */
 	int client_io_min_rate;
 	/*
 	 * Global timeout in seconds for this cgit instance to receive SIGALRM, ignored if zero.
 	 * Essential if httpd doesn't forward signals, e.g. `Apache2` + `suEXEC`.
-    	 * Use approximate 1-2s before `Apache2` `Timeout` core-config to hold bots back, e.g. `Apache Timeout=10, cgit timeout=8`.
-    	 * Defaults to 0s.
+	 * Use approximate 1-2s before `Apache2` `Timeout` core-config to hold bots back, e.g. `Apache Timeout=10, cgit timeout=8`.
+	 * Defaults to 30s, consider a lower value.
 	 */
 	int timeout;
 	int case_sensitive_sort;

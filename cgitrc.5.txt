@@ -103,24 +103,24 @@ cache-static-ttl::
 cache-lock-fail::
 	Cache lock fail action as http-response code.
 	200 returns un-cached processed content (OK),
-	otherwise an error page is served. Default value: "200" (OK).
+	otherwise an error page is served. Default value: "429" (Too Many Requests).
 
 cache-lock-retry::
 	Cache lock fail http-header `Retry-After` value in seconds,
 	used if cache-lock-fail is not 200 (OK) and serves an error page.
-	Default value: "30" (30s).
+	Default value: "42" (42s).
 
 cache-lock-timeout::
 	Timeout in millisseconds to acquire the cache lock-file
-	against concurrent processes. Default value: "1000" (1000ms).
+	against concurrent processes. Default value: "2000" (2000ms).
 
 client-io-idle-timeout::
 	IDLE timeout in seconds between sending/receiving chunks
-	of the cached body to/from the client. Default value: "20" (20s).
+	of the cached body to/from the client. Default value: "5" (s).
 
 client-io-min-rate::
 	Minimum transfer rate in Bps for sending/receiving a full cached
-	body to/from the client. Default value "500" (500 Bps).
+	body to/from the client. Default value "10000" (10000 Bps).
 
 clone-prefix::
 	Space-separated list of common prefixes which, when combined with a
@@ -475,7 +475,7 @@ timeout::
 	Essential if httpd doesn't forward signals, e.g. `Apache2` + `suEXEC`.
 	Use approximate 1-2s before `Apache2` `Timeout` core-config to hold bots back,
 	e.g. `Apache Timeout=10, cgit timeout=8`.
-	Defaults to value: "0" (0s).
+	Defaults to value: "30" (30s).
 
 virtual-root::
 	Url which, if specified, will be used as root for all cgit links. It
