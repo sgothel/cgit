@@ -931,9 +931,16 @@ static void cgit_alarm_sighandler(int sig)
 			    "<!DOCTYPE html>\n"
 			    "<html lang='en'><head><title>429 - cgit error</title>"
 			    "<meta name='generator' content='cgit '/><meta name='robots' content='index, nofollow'/></head>\n"
-			    "<body><p>cgit is currently being overrun by bots. Please try again later.</p></body></html>\n";
-			error_page_bytes = sizeof(error_page);
-			const ssize_t wres = write(STDOUT_FILENO, error_page, error_page_bytes);
+			    "<body><p>";
+			static const char error_page_end[] = "</p></body></html>\n";
+			char buffer[1024];
+			char *p = buffer;
+			size_t remaining = sizeof(buffer);
+			p = cgit_appends(p, &remaining, error_page);
+			p = cgit_appends(p, &remaining, ctx.cfg.timeout_msg);
+			p = cgit_appends(p, &remaining, error_page_end);
+			error_page_bytes = sizeof(buffer) - remaining;
+			const ssize_t wres = write(STDOUT_FILENO, buffer, error_page_bytes);
 			if (wres >= 0) {
 				error_page_bytes_sent = wres;
 			} else {

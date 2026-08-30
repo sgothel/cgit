@@ -477,6 +477,10 @@ timeout::
 	e.g. `Apache Timeout=10, cgit timeout=8`.
 	Defaults to value: "30" (30s).
 
+timeout-msg::
+	SIGALRM timeout http error-page message.
+	Defaults value: "Server is currently under heavy load. Please try again later."
+
 virtual-root::
 	Url which, if specified, will be used as root for all cgit links. It
 	will also cause cgit to generate 'virtual urls', i.e. urls like

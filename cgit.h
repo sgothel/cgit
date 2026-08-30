@@ -250,6 +250,8 @@ struct cgit_config {
 	 * Defaults to 30s, consider a lower value.
 	 */
 	int timeout;
+	/* SIGALRM timeout http error-page message. Defaults to 'Server is currently under heavy load. Please try again later.'. */
+	char *timeout_msg;
 	int case_sensitive_sort;
 	int embedded;
 	int enable_filter_overrides;

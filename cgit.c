@@ -231,6 +231,8 @@ static void config_cb(const char *name, const char *value)
 		ctx.cfg.client_io_min_rate = atoi(value);
 	else if (!strcmp(name, "timeout"))
 		ctx.cfg.timeout = atoi(value);
+	else if (!strcmp(name, "timeout-msg"))
+		ctx.cfg.timeout_msg = strdup_first_line(value);
 	else if (!strcmp(name, "cache-dynamic-ttl"))
 		ctx.cfg.cache_dynamic_ttl = atoi(value);
 	else if (!strcmp(name, "cache-about-ttl"))
@@ -404,6 +406,7 @@ static void prepare_context(void)
 	ctx.cfg.client_io_idle_timeout = 5000;
 	ctx.cfg.client_io_min_rate = 10000;
 	ctx.cfg.timeout = 30;
+	ctx.cfg.timeout_msg = "Server is currently under heavy load. Please try again later.";
 	ctx.cfg.case_sensitive_sort = 1;
 	ctx.cfg.branch_sort = 0;
 	ctx.cfg.commit_sort = 0;
