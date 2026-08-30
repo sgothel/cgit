@@ -103,10 +103,6 @@ static void print_object(const struct object_id *oid, const char *path, const ch
 		cgit_print_layout_start();
 		htmlf("blob: %s (", oid_to_hex(oid));
 		cgit_plain_link("plain", NULL, NULL, ctx.qry.head, rev, path);
-		if (ctx.repo->enable_blame && !is_binary) {
-			html(") (");
-			cgit_blame_link("blame", NULL, NULL, ctx.qry.head, rev, path);
-		}
 		htmlf(")\n<div class='error'>blob size (%ldKB) exceeds display size limit (%dKB).</div>",
 				size / 1024, ctx.cfg.max_blob_size);
 		return;
