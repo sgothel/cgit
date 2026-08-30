@@ -919,6 +919,7 @@ static void cgit_alarm_sighandler(int sig)
 		const long dt_ms = cgit_ts_ms_sub(&now, &term_ctx.start);
 		size_t error_page_bytes = 0;
 		size_t error_page_bytes_sent = 0;
+		int error_page_errno = 0;
 		long dt_sent = 0;
 
 		if (0 == term_ctx.sent_to_client) {
@@ -932,8 +933,12 @@ static void cgit_alarm_sighandler(int sig)
 			    "<meta name='generator' content='cgit '/><meta name='robots' content='index, nofollow'/></head>\n"
 			    "<body><p>cgit is currently being overrun by bots. Please try again later.</p></body></html>\n";
 			error_page_bytes = sizeof(error_page);
-			ssize_t e;
-			error_page_bytes_sent = ( e = write(STDOUT_FILENO, error_page, error_page_bytes) ) ? e : 0;
+			const ssize_t wres = write(STDOUT_FILENO, error_page, error_page_bytes);
+			if (wres >= 0) {
+				error_page_bytes_sent = wres;
+			} else {
+				error_page_errno = errno;
+			}
 			dt_sent = cgit_ts_ms_sub_current(&now);
 		}
 		char dest_mem[512];
@@ -948,8 +953,14 @@ static void cgit_alarm_sighandler(int sig)
 		dest = cgit_appends(dest, &dest_sz, "', ");
 		if (0 == term_ctx.sent_to_client) {
 			dest = cgit_appends(dest, &dest_sz, "error-page[");
-			dest = cgit_appendl(dest, &dest_sz, (long)error_page_bytes_sent, '\'');
-			dest = cgit_appends(dest, &dest_sz, "B/");
+			if (error_page_errno) {
+				dest = cgit_appends(dest, &dest_sz, "error ");
+				dest = cgit_appendl(dest, &dest_sz, (long)error_page_errno, 0);
+				dest = cgit_appends(dest, &dest_sz, " while sending ");
+			} else {
+				dest = cgit_appendl(dest, &dest_sz, (long)error_page_bytes_sent, '\'');
+				dest = cgit_appends(dest, &dest_sz, "B/");
+			}
 			dest = cgit_appendl(dest, &dest_sz, (long)error_page_bytes, '\'');
 			dest = cgit_appends(dest, &dest_sz, "B in ");
 			dest = cgit_appendl(dest, &dest_sz, (long)dt_sent, '\'');
