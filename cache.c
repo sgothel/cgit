@@ -585,7 +585,7 @@ static int process_slot(struct cache_slot *slot)
 		const long dt_lock = cgit_ts_ms_sub_current(&tStart);
 		if (ctx.cfg.cache_lock_fail != 200) {
 			cgit_print_error_page(ctx.cfg.cache_lock_fail,
-			    "Cache: Unable to lock new-slot within %ldms.", dt_lock);
+				"Server is currently under heavy load. Please try again later (cache-lock).");
 		} else {
 			cgit_mark_termf("cache-lock-fail, git [peek %ldms, lock %ldms]", dt_peek, dt_lock);
 			cgit_ts_current(&tStart);
@@ -607,7 +607,7 @@ static int process_slot(struct cache_slot *slot)
 			cgit_log("Lock (%ldms): Post-lock pre-git-timeout for new-slot %s (%s)\n",
 				dt_lock, slot->lock_name, slot->key);
 			cgit_print_error_page(ctx.cfg.cache_lock_fail,
-				"Server is currently under heavy load. Please try again later (post-lock-timeout).");
+				"Server is currently under heavy load. Please try again later (post-lock).");
 			return 0;
 		}
 		cgit_mark_termf("cache git [peek %ldms, lock %ldms]", dt_peek, dt_lock);
@@ -620,7 +620,8 @@ static int process_slot(struct cache_slot *slot)
 			close_lock(slot);
 			cgit_log("Unable to fill slot in %ldms %s (peek %ldms, lock %ldms, %s): %s (%d)\n",
 				 dt_git, slot->lock_name, dt_peek, dt_lock, slot->key, strerror(err), err);
-			cgit_print_error_page(429, "Cache: Unable to fill slot within %ldms.", dt_git);
+			cgit_print_error_page(429,
+				"Server is currently under heavy load. Please try again later (cache-fill).");
 			return 0;
 		}
 		// We've got a valid cache slot in the lock file, which
