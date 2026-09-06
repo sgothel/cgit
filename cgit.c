@@ -225,6 +225,8 @@ static void config_cb(const char *name, const char *value)
 		ctx.cfg.cache_lock_retry = atoi(value);
 	else if (!strcmp(name, "cache-lock-timeout"))
 		ctx.cfg.cache_lock_timeout = MY_MAX(1000, atoi(value)); // ms
+	else if (!strcmp(name, "cache-pre-git-timeout"))
+		ctx.cfg.cache_pre_git_timeout = MY_MAX(1000, atoi(value));  // ms
 	else if (!strcmp(name, "client-io-idle-timeout"))
 		ctx.cfg.client_io_idle_timeout = MY_MAX(1, atoi(value))*1000; // s -> ms
 	else if (!strcmp(name, "client-io-min-rate"))
@@ -403,6 +405,7 @@ static void prepare_context(void)
 	ctx.cfg.cache_lock_fail = 429;
 	ctx.cfg.cache_lock_retry = 42;
 	ctx.cfg.cache_lock_timeout = 2000;
+	ctx.cfg.cache_pre_git_timeout = 4000;
 	ctx.cfg.client_io_idle_timeout = 5000;
 	ctx.cfg.client_io_min_rate = 10000;
 	ctx.cfg.timeout = 30;
@@ -904,6 +907,7 @@ static void print_config(FILE *f, const char *prefix)
 	fprintf(f, "%scache-lock-fail=%d\n", prefix, ctx.cfg.cache_lock_fail);
 	fprintf(f, "%scache-lock-retry=%d\n", prefix, ctx.cfg.cache_lock_retry);
 	fprintf(f, "%scache-lock-timeout=%d\n", prefix, ctx.cfg.cache_lock_timeout);
+	fprintf(f, "%scache-pre-git-timeout=%d\n", prefix, ctx.cfg.cache_pre_git_timeout);
 	fprintf(f, "%sclient-io-idle-timeout=%d\n", prefix, ctx.cfg.client_io_idle_timeout);
 	fprintf(f, "%sclient-io-min-rate=%d\n", prefix, ctx.cfg.client_io_min_rate);
 	fprintf(f, "%stimeout=%d\n", prefix, ctx.cfg.timeout);

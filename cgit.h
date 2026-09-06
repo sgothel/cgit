@@ -239,6 +239,8 @@ struct cgit_config {
 	int cache_lock_retry;
 	/* cache lock timeout in milliseconds to acquire the cache lock-file against concurrent processes. Defaults to 2000ms. */
 	int cache_lock_timeout;
+	/* cache pre-git timeout in milliseconds to complete cache processing up-until git processing to fill a new cache-slot. Defaults to 4000ms. */
+	int cache_pre_git_timeout;
 	/* idle timeout in milliseconds between sending/receiving chunks of the cached body to/from the client. Defaults to 5000ms. */
 	int client_io_idle_timeout;
 	/* minimum transfer rate in Bps for sending/receiving a full cached body to/from the client. Defaults to 10000 Bps. */

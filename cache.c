@@ -600,7 +600,16 @@ static int process_slot(struct cache_slot *slot)
 
 	long dt_git = 0;
 	if (slot->cache_fd < 0) {
-		// first concurrent process lock
+		// first concurrent process lock, requires git-fill
+		if (dt_lock > ctx.cfg.cache_pre_git_timeout) {
+			unlock_slot(slot, UNLINK_LOCK_FILE);
+			close_lock(slot);
+			cgit_log("Lock (%ldms): Post-lock pre-git-timeout for new-slot %s (%s)\n",
+				dt_lock, slot->lock_name, slot->key);
+			cgit_print_error_page(ctx.cfg.cache_lock_fail,
+				"Server is currently under heavy load. Please try again later (post-lock-timeout).");
+			return 0;
+		}
 		cgit_mark_termf("cache git [peek %ldms, lock %ldms]", dt_peek, dt_lock);
 		cgit_sentmask_term(1);
 		cgit_ts_current(&tStart);
