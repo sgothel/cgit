@@ -606,8 +606,8 @@ static int process_slot(struct cache_slot *slot)
 		if (dt_pre_git > ctx.cfg.cache_pre_git_timeout) {
 			unlock_slot(slot, UNLINK_LOCK_FILE);
 			close_lock(slot);
-			cgit_log("Lock (%ldms): Post-lock pre-git-timeout for new-slot %s (%s)\n",
-				dt_pre_git, slot->lock_name, slot->key);
+			cgit_log("Pre-Git (%ldms): Timeout [peek %ldms, lock %ldms] for new-slot %s (%s)\n",
+				dt_pre_git, dt_peek, dt_lock, slot->lock_name, slot->key);
 			cgit_print_error_page(ctx.cfg.cache_lock_fail,
 				"Server is currently under heavy load. Please try again later (post-lock).");
 			return 0;
