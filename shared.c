@@ -654,12 +654,6 @@ struct timespec *cgit_ts_sub(struct timespec *tsr, const struct timespec *ts1, c
 	return cgit_ts_normalize(tsr);
 }
 
-long cgit_ts_ms_sub(const struct timespec *ts1, const struct timespec *ts2)
-{
-	struct timespec tsr;
-	return cgit_ts_to_ms( cgit_ts_sub(&tsr, ts1, ts2) );
-}
-
 /**
  * Returns an integer indicating the result of the comparison, as follows:
  * • 0, if the lhs and rhs are equal;
@@ -678,19 +672,35 @@ int cgit_ts_cmp(const struct timespec* lhs, const struct timespec* rhs) {
  * @param ts timespec storage
  * @return the passed timespec storage
  */
-struct timespec *cgit_ts_current(struct timespec *ts)
+struct timespec *cgit_ts_current(struct timespec *tsNow)
 {
-	clock_gettime(CLOCK_MONOTONIC, ts);
-	return ts;
+	clock_gettime(CLOCK_MONOTONIC, tsNow);
+	return tsNow;
 }
 
-long cgit_ts_ms_sub_current(const struct timespec *ts)
+long cgit_ts_ms_sub(const struct timespec *ts1, const struct timespec *ts2)
 {
-	struct timespec tNow, tDiff;
-	return cgit_ts_to_ms( cgit_ts_sub(&tDiff, cgit_ts_current(&tNow), ts) );
+	struct timespec tsr;
+	return cgit_ts_to_ms( cgit_ts_sub(&tsr, ts1, ts2) );
 }
 
+long cgit_ts_ms_sub_current(const struct timespec *tsLast)
+{
+	struct timespec tNow;
+	return cgit_ts_ms_sub(cgit_ts_current(&tNow), tsLast);
+}
 
+/**
+ * Stores current in `tsNow`, then subtracts `tsLast` and returns result in milliseconds.
+ *
+ * @param tsNow storage for current
+ * @param tsLast value will be cached upfront and allowed to be same as `tsNow`.
+ */
+long cgit_ts_current_ms_sub(struct timespec *tsNow, const struct timespec *tsLast)
+{
+	struct timespec tsSave = *tsLast;
+	return cgit_ts_ms_sub(cgit_ts_current(tsNow), &tsSave);
+}
 
 #define MY_MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 #define MY_MAX(X, Y) (((X) > (Y)) ? (X) : (Y))

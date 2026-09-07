@@ -435,10 +435,20 @@ extern struct timespec *cgit_ts_normalize(struct timespec *ts);
 extern long cgit_ts_to_ms(const struct timespec *ts);
 extern struct timespec *cgit_ts_add(struct timespec *tsr, const struct timespec *ts1, const struct timespec *ts2);
 extern struct timespec *cgit_ts_sub(struct timespec *tsr, const struct timespec *ts1, const struct timespec *ts2);
-extern long cgit_ts_ms_sub(const struct timespec *ts1, const struct timespec *ts2);
 extern int cgit_ts_cmp(const struct timespec* lhs, const struct timespec* rhs);
-extern struct timespec *cgit_ts_current(struct timespec *ts);
-extern long cgit_ts_ms_sub_current(const struct timespec *ts);
+/* Stores current in `tsNow`. */
+extern struct timespec *cgit_ts_current(struct timespec *tsNow);
+/* Subtracts `ts2` from `ts1` and returns result in milliseconds. */
+extern long cgit_ts_ms_sub(const struct timespec *ts1, const struct timespec *ts2);
+/* Subtracts `tsLast` from current and returns result in milliseconds. */
+extern long cgit_ts_ms_sub_current(const struct timespec *tsLast);
+/**
+ * Stores current in `tsNow`, then subtracts `tsLast` and returns result in milliseconds.
+ *
+ * @param tsNow storage for current
+ * @param tsLast value will be cached upfront and allowed to be same as `tsNow`.
+ */
+extern long cgit_ts_current_ms_sub(struct timespec *tsNow, const struct timespec *tsLast);
 
 ssize_t cgit_write_to(int fd, const void *buf, size_t count, off_t *total_out,
 		      const struct timespec *tStart,
