@@ -546,13 +546,13 @@ uint64_t hash64_str_clipped(const void *d, size_t len, size_t value_count) {
 static int process_slot(struct cache_slot *slot)
 {
 	int err;
-	struct timespec tStart;
+	struct timespec tLast;
 
 	cgit_mark_term("cache start");
-	cgit_ts_current(&tStart);
+	cgit_ts_current(&tLast);
 	err = open_slot(slot);
 	if (!err && slot->match && !is_expired(slot)) {
-		const long dt_peek = cgit_ts_ms_sub_current(&tStart);
+		const long dt_peek = cgit_ts_ms_sub_current(&tLast);
 		cgit_mark_termf("cache print [peek %ldms]", dt_peek);
 		if (!err && ctx.cfg.log_level >= LOG_LVL_WARN+1) {
 			cgit_log("Using hash matching slot %s (%s)\n",
@@ -560,14 +560,14 @@ static int process_slot(struct cache_slot *slot)
 		}
 		if ((err = print_slot(slot)) != 0 && err != ETIMEDOUT) {
 			cgit_log("error printing cache within %ldms [peek %ldms], %s (%s): %s (%d)\n",
-				  cgit_ts_ms_sub_current(&tStart)-dt_peek, dt_peek,
+				  cgit_ts_ms_sub_current(&tLast)-dt_peek, dt_peek,
 				  slot->cache_name, slot->key, strerror(err), err);
 		}
 		close_slot(slot);
 		return err;
 	}
 	close_slot(slot);
-	const long dt_peek = cgit_ts_ms_sub_current(&tStart);
+	const long dt_peek = cgit_ts_ms_sub_current(&tLast);
 
 	/* If the cache slot does not exist (or its key doesn't match the
 	 * current key), lets try to create a new cache slot for this
@@ -580,23 +580,23 @@ static int process_slot(struct cache_slot *slot)
 	 * serve the new content from the new cachefile.
 	 */
 	cgit_mark_termf("cache lock [peek %ldms]", dt_peek);
-	cgit_ts_current(&tStart);
-	if ((err = lock_slot(slot, &tStart)) != 0) {
-		const long dt_lock = cgit_ts_ms_sub_current(&tStart);
+	cgit_ts_current(&tLast);
+	if ((err = lock_slot(slot, &tLast)) != 0) {
+		const long dt_lock = cgit_ts_ms_sub_current(&tLast);
 		if (ctx.cfg.cache_lock_fail != 200) {
 			cgit_print_error_page(ctx.cfg.cache_lock_fail,
 				"Server is currently under heavy load. Please try again later (cache-lock).");
 		} else {
 			cgit_mark_termf("cache-lock-fail, git [peek %ldms, lock %ldms]", dt_peek, dt_lock);
-			cgit_ts_current(&tStart);
+			cgit_ts_current(&tLast);
 			slot->fn();
 			cgit_log("Uncached fill took %ldms %s (peek %ldms, failed lock %ldms, %s)\n",
-				  cgit_ts_ms_sub_current(&tStart), slot->key,
+				  cgit_ts_ms_sub_current(&tLast), slot->key,
 				  dt_peek, dt_lock, slot->lock_name);
 		}
 		return 0;
 	}
-	const long dt_lock = cgit_ts_ms_sub_current(&tStart);
+	const long dt_lock = cgit_ts_ms_sub_current(&tLast);
 
 	long dt_git = 0;
 	if (slot->cache_fd < 0) {
@@ -612,9 +612,9 @@ static int process_slot(struct cache_slot *slot)
 		}
 		cgit_mark_termf("cache git [peek %ldms, lock %ldms]", dt_peek, dt_lock);
 		cgit_sentmask_term(1);
-		cgit_ts_current(&tStart);
+		cgit_ts_current(&tLast);
 		err = fill_slot(slot);
-		dt_git = cgit_ts_ms_sub_current(&tStart);
+		dt_git = cgit_ts_ms_sub_current(&tLast);
 		if (err != 0) {
 			unlock_slot(slot, UNLINK_LOCK_FILE);
 			close_lock(slot);
