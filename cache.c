@@ -546,10 +546,11 @@ uint64_t hash64_str_clipped(const void *d, size_t len, size_t value_count) {
 static int process_slot(struct cache_slot *slot)
 {
 	int err;
-	struct timespec tLast;
+	struct timespec tStart, tLast;
 
 	cgit_mark_term("cache start");
-	cgit_ts_current(&tLast);
+	cgit_ts_current(&tStart);
+	tLast = tStart;
 	err = open_slot(slot);
 	if (!err && slot->match && !is_expired(slot)) {
 		const long dt_peek = cgit_ts_ms_sub_current(&tLast);
@@ -596,16 +597,17 @@ static int process_slot(struct cache_slot *slot)
 		}
 		return 0;
 	}
-	const long dt_lock = cgit_ts_ms_sub_current(&tLast);
+	const long dt_lock = cgit_ts_current_ms_sub(&tLast, &tLast);
 
 	long dt_git = 0;
 	if (slot->cache_fd < 0) {
 		// first concurrent process lock, requires git-fill
-		if (dt_lock > ctx.cfg.cache_pre_git_timeout) {
+		const long dt_pre_git = cgit_ts_ms_sub(&tLast, &tStart);
+		if (dt_pre_git > ctx.cfg.cache_pre_git_timeout) {
 			unlock_slot(slot, UNLINK_LOCK_FILE);
 			close_lock(slot);
 			cgit_log("Lock (%ldms): Post-lock pre-git-timeout for new-slot %s (%s)\n",
-				dt_lock, slot->lock_name, slot->key);
+				dt_pre_git, slot->lock_name, slot->key);
 			cgit_print_error_page(ctx.cfg.cache_lock_fail,
 				"Server is currently under heavy load. Please try again later (post-lock).");
 			return 0;
